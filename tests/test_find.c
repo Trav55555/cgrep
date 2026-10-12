@@ -203,10 +203,67 @@ static void test_misleading_anchor(void)
     cu_arena_release(&a);
 }
 
+static void test_guided_filters(void)
+{
+    static const char *const patterns[] = {"bcaaaaaa", "bcdaaaaaa"};
+    static const char *const blocks[] = {"bc", "bcd"};
+    char bytes[4096];
+    CuArena a;
+    Literal literal;
+    size_t p;
+    size_t i;
+    size_t period;
+    size_t last;
+
+    for (p = 0; p < sizeof patterns / sizeof patterns[0]; p++) {
+        period = strlen(blocks[p]);
+        for (i = 0; i < sizeof bytes; i++)
+            bytes[i] = blocks[p][i % period];
+        cu_arena_init(&a);
+        assert(literal_init(&literal, &a, cu_str_cstr(patterns[p])));
+        confirmations = 0;
+        kmp_bytes = 0;
+        assert(find(cu_str_n(bytes, sizeof bytes), 0, &literal) == NO_MATCH);
+        /* Pattern-local rare bytes are hot in this input. The expected
+         * byte at the actual mismatch is absent, so KMP need not scan it. */
+        assert(confirmations <= 16 && kmp_bytes == 0);
+        last = sizeof bytes - literal.text.len;
+        memcpy(bytes + last, patterns[p], literal.text.len);
+        confirmations = 0;
+        assert(find(cu_str_n(bytes, sizeof bytes), 0, &literal) == last);
+        assert(confirmations <= 16);
+        cu_arena_release(&a);
+    }
+    /* Ignore bytes before the requested start when diagnosing a candidate. */
+    memset(bytes, 'a', 64);
+    for (i = 64; i < sizeof bytes; i++)
+        bytes[i] = "bc"[(i - 64) % 2];
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, CU_LIT("bcaaaaaa")));
+    confirmations = 0;
+    kmp_bytes = 0;
+    assert(find(cu_str_n(bytes, sizeof bytes), 64, &literal) == NO_MATCH);
+    assert(confirmations <= 16 && kmp_bytes == 0);
+    cu_arena_release(&a);
+
+    /* A mismatch against the same byte as the active filter cannot help.
+     * Keep the precomputed distinct alternate for this case. */
+    memset(bytes, 'c', sizeof bytes);
+    memcpy(bytes, "abxabc", 6);
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, CU_LIT("abcabc")));
+    confirmations = 0;
+    kmp_bytes = 0;
+    assert(find(cu_str_n(bytes, sizeof bytes), 0, &literal) == NO_MATCH);
+    assert(confirmations <= 16 && kmp_bytes == 0);
+    cu_arena_release(&a);
+}
+
 static void test_fallback(void)
 {
     char overlap[18];
     char dual_overlap[26];
+    char guided_overlap[24];
     char *bytes;
     char needlebuf[66];
     CuArena a;
@@ -237,6 +294,21 @@ static void test_fallback(void)
     confirmations = 0;
     kmp_bytes = 0;
     assert(find(cu_str_n(dual_overlap, sizeof dual_overlap), 0, &literal) == 20);
+    assert(confirmations <= 16);
+    cu_arena_release(&a);
+
+    /* The first failure agrees on "ba", then mismatches the repeated 'b'
+     * at offset 2. Both filters remain hot. The final false candidate's
+     * anchor overlaps the true match, so KMP must resume at start + 1. */
+    memcpy(guided_overlap, "baxa", 4);
+    memset(guided_overlap + 4, 'c', 8);
+    memset(guided_overlap + 12, 'b', 7);
+    memcpy(guided_overlap + 19, "babac", 5);
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, CU_LIT("babac")));
+    confirmations = 0;
+    kmp_bytes = 0;
+    assert(find(cu_str_n(guided_overlap, sizeof guided_overlap), 0, &literal) == 19);
     assert(confirmations <= 16 && kmp_bytes != 0);
     cu_arena_release(&a);
 
@@ -317,6 +389,7 @@ int main(void)
     test_exact_boundary();
     test_selective_candidate();
     test_misleading_anchor();
+    test_guided_filters();
     test_fallback();
     test_optional_numbering();
     test_pattern_failure();

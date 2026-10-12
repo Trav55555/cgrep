@@ -27,9 +27,11 @@ cgrep reuses a 64 KiB input window across files, growing it only for an
 unfinished line. It prepares the literal once per command. `memchr`
 filters candidates using the byte least repeated within the pattern, and
 `memcmp` confirms them. That
-choice is only a heuristic: after repeated false candidates, search tries
-one distinct alternate byte. If that filter is also ineffective, it
-switches to Knuth-Morris-Pratt, or KMP. Its prefix table takes O(pattern
+choice is only a heuristic. Search inspects the first failed comparison
+once and uses its mismatched expected byte to suggest a different filter.
+If that byte is unchanged, it keeps the pattern-derived alternate. After
+at most one switch and a bounded number of false candidates, search falls
+back to Knuth-Morris-Pratt, or KMP. Its prefix table takes O(pattern
 length) memory. Search work is O(input length + pattern length), including
 preparation. Line counting runs only when `-n` requests it.
 
@@ -78,7 +80,7 @@ python3 -I tests/benchmark.py build/cgrep --repeats 7
 
 The benchmark includes absent literals, a last-line match, repeated-prefix
 failures, a misleading candidate byte, uniform patterns, and two hot
-candidate bytes. Pass
+candidate bytes, including a three-hot-byte case. Pass
 `--baseline /path/to/previous-cgrep` for a paired comparison. The benchmark
 shuffles program order on every repetition. Fuzz harnesses cover byte
 matching in `fuzz/fuzz_find.c` and short-read/error framing in

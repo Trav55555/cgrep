@@ -29,6 +29,7 @@ def main():
     misleading_line = b"b" * 128 + b"\n"
     uniform_line = b"a" * 31 + b"\n"
     two_hot_line = b"bc" * 64 + b"\n"
+    three_hot_line = b"bcd" * 42 + b"\n"
     corpora = [
         ("absent", "NEEDLE42", ordinary, b"", 1),
         ("last-line", "NEEDLE42", ordinary + b"NEEDLE42\n", b"NEEDLE42\n", 0),
@@ -36,6 +37,7 @@ def main():
         ("misleading-anchor", "b" + "a" * 31, misleading_line * (target // len(misleading_line)), b"", 1),
         ("uniform", "a" * 32, uniform_line * (target // len(uniform_line)), b"", 1),
         ("two-hot-anchors", "bc" + "a" * 30, two_hot_line * (target // len(two_hot_line)), b"", 1),
+        ("three-hot-anchors", "bcd" + "a" * 29, three_hot_line * (target // len(three_hot_line)), b"", 1),
     ]
     report = {"ripgrep": subprocess.check_output(["rg", "--version"], text=True).splitlines()[0],
               "repeats": args.repeats, "cache": "warm", "cases": []}

@@ -118,9 +118,9 @@ static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
     return find_end(chunk, 0, literal, state) != NO_MATCH;
 }
 
-/* First occurrence at or after start. Each candidate byte gets at most
- * eight false confirmations. An ineffective first byte switches to a
- * distinct alternate once, then KMP bounds any further search work. */
+/* First occurrence at or after start. Inspect the first failed candidate
+ * once to suggest an expected byte that actually mismatched. Each filter
+ * gets at most eight false confirmations, then KMP bounds remaining work. */
 static size_t find(CuStr hay, size_t start, const Literal *literal)
 {
     CuStr needle;
@@ -129,6 +129,9 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
     size_t last;
     unsigned rejects;
     size_t anchor;
+    size_t suggested;
+    size_t j;
+    int switched;
 
     needle = literal->text;
     if (start > hay.len || needle.len > hay.len - start)
@@ -143,6 +146,8 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
     at = start;
     rejects = 0;
     anchor = literal->anchor;
+    suggested = literal->alternate;
+    switched = 0;
     while (at <= last) {
         p = (const char *)memchr(hay.ptr + at + anchor,
                                 (unsigned char)needle.ptr[anchor], last - at + 1);
@@ -151,11 +156,19 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
         at = (size_t)(p - hay.ptr) - anchor;
         if (memcmp(hay.ptr + at, needle.ptr, needle.len) == 0)
             return at;
+        if (rejects == 0 && !switched) {
+            j = 0;
+            while (j < needle.len && hay.ptr[at + j] == needle.ptr[j])
+                j++;
+            if (j < needle.len && needle.ptr[j] != needle.ptr[anchor])
+                suggested = j;
+        }
         at++;
         if (++rejects == 8) {
-            if (anchor == literal->alternate)
+            if (switched || needle.ptr[anchor] == needle.ptr[suggested])
                 return find_linear(hay, at, literal);
-            anchor = literal->alternate;
+            anchor = suggested;
+            switched = 1;
             rejects = 0;
         }
     }

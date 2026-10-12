@@ -3,8 +3,9 @@
 Streaming input, the selective matcher, and optional line counting pass
 the native and wasm gates. Boundary, memory-budget, error, and fuzz checks
 support the implementation. The project remains partially verified: deep
-checks have tool failures. The original misleading-anchor bottleneck is
-fixed, but the new two-hot-anchor fixture still misses the 2x ripgrep target.
+checks have tool failures. Mismatch-guided selection closes the measured
+two- and three-hot-byte gaps. The tested corpus is not evidence of universal
+performance parity or a formal correctness proof.
 
 ## Reproduce
 
@@ -27,7 +28,63 @@ round. `make mutate` returns nonzero for surviving mutations, including
 functional equivalents and tuning changes. Its regular-file limit does
 not bound subprocess pipe captures, so the outer memory cap matters.
 
-## Current adaptive-filter evidence
+## Current mismatch-guided evidence
+
+The matcher inspects the first failed comparison once, relative to that
+candidate's start. A different expected byte at the mismatch becomes the
+suggested alternate; otherwise the pattern-derived alternate remains.
+The choice is local to the finder call, not stored in the shared Literal.
+Only one switch is permitted, with at most sixteen false confirmations
+before KMP. The extra diagnostic pass adds O(m) work once, so the O(n + m)
+search bound and buffer ownership are unchanged.
+
+Raw logs, the published control binary, paired benchmarks, and rerunnable
+`sensitivity.py` are in `/tmp/cgrep-mismatch-guided.s6I0CZ`. Runs used a 3 GiB
+memory cap, no additional swap, and reduced CPU priority.
+
+- The compiler, analyzer, ASan/UBSan, MSan, release, and wasm gate passed.
+  Coverage was 93.09%. Existing authority/regions skips and the documented
+  deep-tool blockers remain unchanged.
+- 400 default differential cases and 3000 cases each with seeds 7 and 42
+  passed against the supported streaming reference. Unsigned-char tests
+  and native memory-budget/I/O checks passed.
+- Finder fuzzing completed 7,402,396 executions in 31 seconds, and framing
+  fuzzing completed 133,592 executions in 31 seconds without oracle or
+  sanitizer errors. Existing size caps were retained.
+- Work-counter regressions failed on the published matcher: hot pattern
+  bytes should not force a full KMP scan when the observed mismatched byte
+  is absent. Fixtures include two/three hot values, nonzero search starts,
+  a final positive match, and a mismatch against the active filter's value.
+- The previous overlap fixture remains a correctness test. A new repeated-
+  byte fixture deliberately forces both rejection budgets and an overlapping
+  KMP resume with a nonzero suggested offset.
+- Six defects compiled and failed assertions: ignoring the observed mismatch,
+  diagnosing relative to the wrong origin, skipping starts during switching,
+  skipping an overlapping fallback match, disabling bounded fallback, and
+  subtracting the original anchor after switching. This is targeted
+  sensitivity, not a new full mutation score.
+
+Seven paired warm-cache repetitions on tmpfs, stdout discarded, randomized
+program order. Median milliseconds for 64 MiB input:
+
+| Corpus | Published control | Mismatch-guided | ripgrep auto-mmap |
+| --- | ---: | ---: | ---: |
+| Absent literal | 7.56 | 7.51 | 7.13 |
+| Last-line match | 8.32 | 8.25 | 7.45 |
+| Repeated-prefix failures | 8.91 | 8.77 | 7.48 |
+| Original misleading byte | 8.55 | 8.53 | 8.06 |
+| Uniform pattern | 90.05 | 89.02 | 107.23 |
+| Two hot values | 81.81 | 8.68 | 28.70 |
+| Three hot values | 71.16 | 9.47 | 21.39 |
+
+The two/three-hot cases improved about 9.4x and 7.5x. Ordinary cases were
+roughly unchanged. All seven measured cases fall within 2x ripgrep in this
+run, but matched-output-heavy workloads, many small files, cold I/O, and
+changing byte distributions have not been evaluated here. A bad suggested
+filter can still enter KMP; the heuristic does not promise SIMD throughput
+on every input.
+
+## Previous adaptive-filter evidence
 
 The matcher now prepares a distinct alternate candidate byte. Each filter
 gets a constant rejection budget before switching once or falling back to
