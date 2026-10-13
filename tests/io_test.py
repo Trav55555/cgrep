@@ -68,6 +68,11 @@ def main():
         if (result.returncode, result.stdout, result.stderr) != (0, b'match:alpha\n', b''):
             raise RuntimeError(f'large file exceeded its memory budget: {result!r}')
         print('PASS streaming file: 64 MiB input under a 32 MiB address-space limit')
+        result = subprocess.run([binary, '-j8', 'alpha', *(['large'] * 7), 'match'], cwd=root,
+                                capture_output=True, timeout=20, preexec_fn=memory_limit(32))
+        if (result.returncode, result.stdout, result.stderr) != (0, b'match:alpha\n', b''):
+            raise RuntimeError(f'eight-worker memory budget failed: {result!r}')
+        print('PASS eight workers: 448 MiB scanned under a 32 MiB address-space limit')
         result = pipe_input([binary, 'alpha', '-', 'match'], root / 'large', root)
         if (result.returncode, result.stdout, result.stderr) != (0, b'match:alpha\n', b''):
             raise RuntimeError(f'large pipe exceeded its memory budget: {result!r}')
@@ -85,6 +90,12 @@ def main():
         if result.returncode != 2 or result.stdout != b'match:alpha\n' or b'out of memory' not in result.stderr:
             raise RuntimeError(f'allocation refusal or buffer recovery failed: {result!r}')
         print('PASS allocation refusal: failed buffer discarded, later input still searched')
+        for limit, reason in [(32, b'line exceeds 8 MiB'), (12, b'out of memory')]:
+            result = subprocess.run([binary, '-j8', 'alpha', 'long', 'match'], cwd=root,
+                                    capture_output=True, timeout=10, preexec_fn=memory_limit(limit))
+            if result.returncode != 2 or result.stdout != b'match:alpha\n' or reason not in result.stderr:
+                raise RuntimeError(f'worker input failure/continuation failed: {result!r}')
+        print('PASS worker line/allocator limits: status 2 with ordered later match')
 
         if Path('/dev/full').exists():
             with open('/dev/full', 'wb') as output:
@@ -93,6 +104,12 @@ def main():
             if result.returncode != 2:
                 raise RuntimeError(f'output error was not reported: {result!r}')
             print('PASS output device failure: status 2')
+            with open('/dev/full', 'wb') as output:
+                result = subprocess.run([binary, '-j8', 'alpha', *(['match'] * 8)], cwd=root,
+                                        stdout=output, stderr=subprocess.PIPE, timeout=10)
+            if result.returncode != 2:
+                raise RuntimeError(f'worker output failure/join failed: {result!r}')
+            print('PASS worker output device failure: status 2 and joined scope')
         else:
             print('SKIP output device failure: /dev/full unavailable')
         if hasattr(os, 'mkfifo'):
@@ -103,6 +120,12 @@ def main():
             if result.returncode != 2 or b'output error' not in result.stderr:
                 raise RuntimeError(f'failed output did not stop later input: {result!r}')
             print('PASS output failure: later blocking input was never opened')
+            with (root / 'match').open('rb') as output:
+                result = subprocess.run([binary, '-j8', 'alpha', 'match', 'blocked'], cwd=root,
+                                        stdout=output, stderr=subprocess.PIPE, timeout=3)
+            if result.returncode != 2 or b'output error' not in result.stderr:
+                raise RuntimeError(f'non-regular serial fallback failed: {result!r}')
+            print('PASS requested workers: non-regular fallback stops before blocked FIFO')
         else:
             print('SKIP blocking-input check: mkfifo unavailable')
 

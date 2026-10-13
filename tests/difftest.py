@@ -63,6 +63,8 @@ def main() -> int:
     ap.add_argument("cgrep")
     ap.add_argument("--cases", type=int, default=400)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--jobs", type=int, choices=range(1, 9), default=1,
+                    help="cgrep worker count; reference remains ordered rg -j1")
     args = ap.parse_args()
     cgrep = str(Path(args.cgrep).resolve())
     rng = random.Random(args.seed)
@@ -103,7 +105,7 @@ def main() -> int:
             # does; with threads ripgrep's output order varies.
             want = subprocess.run(["rg", "--no-config", "--no-mmap", "-F", "-j1"] + tail, input=stdin, capture_output=True,
                                   timeout=30, cwd=tmp, env=env)
-            got = subprocess.run([cgrep] + tail, input=stdin, capture_output=True, timeout=30, cwd=tmp)
+            got = subprocess.run([cgrep, f"-j{args.jobs}"] + tail, input=stdin, capture_output=True, timeout=30, cwd=tmp)
             same = (want.returncode == got.returncode and want.stdout == got.stdout
                     and bool(want.stderr) == bool(got.stderr))
             if not same:
@@ -112,7 +114,7 @@ def main() -> int:
                     print(f"case {case}: {tail!r} stdin={len(stdin)} bytes")
                     print(f"  rg    exit {want.returncode}: {want.stdout[:200]!r} err={want.stderr[:120]!r}")
                     print(f"  cgrep exit {got.returncode}: {got.stdout[:200]!r} err={got.stderr[:120]!r}")
-    print(f"difftest: {args.cases - failures}/{args.cases} cases identical")
+    print(f"difftest: {args.cases - failures}/{args.cases} cases identical, cgrep -j{args.jobs} ordered")
     return 1 if failures else 0
 
 

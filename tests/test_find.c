@@ -8,6 +8,7 @@
 #include "cgrep.h"
 
 static size_t confirmations;
+static size_t confirmation_bytes;
 static size_t newline_scans;
 static size_t kmp_bytes;
 static int fail_pattern_alloc;
@@ -15,6 +16,7 @@ static int fail_pattern_alloc;
 static int counted_memcmp(const void *a, const void *b, size_t n)
 {
     confirmations++;
+    confirmation_bytes += n;
     return memcmp(a, b, n);
 }
 
@@ -340,6 +342,57 @@ static void test_fallback(void)
     free(bytes);
 }
 
+static void test_uniform_windows(void)
+{
+    static const unsigned char values[] = {0, 'a', '\n', 233, 255};
+    static const size_t lengths[] = {2, 3, 8, 16, 32, 64};
+    char bytes[257];
+    char pattern[64];
+    CuArena arena;
+    Literal literal;
+    size_t c;
+    size_t m;
+    size_t k;
+    size_t i;
+    size_t blocker;
+    size_t start;
+    unsigned char other;
+
+    for (c = 0; c < sizeof values / sizeof values[0]; c++) {
+        other = values[c] == 'x' ? 'y' : 'x';
+        for (k = 0; k < sizeof lengths / sizeof lengths[0]; k++) {
+            m = lengths[k];
+            memset(pattern, values[c], m);
+            cu_arena_init(&arena);
+            assert(literal_init(&literal, &arena, cu_str_n(pattern, m)));
+            assert(literal.alternate == literal.anchor);
+            for (blocker = 0; blocker < 2 * m; blocker++) {
+                memset(bytes, values[c], sizeof bytes);
+                bytes[blocker] = (char)other;
+                for (start = 0; start <= blocker + 1; start++) {
+                    confirmations = 0;
+                    confirmation_bytes = 0;
+                    assert(find(cu_str_n(bytes, sizeof bytes), start, &literal) ==
+                           naive(cu_str_n(bytes, sizeof bytes), start, literal.text));
+                    assert(confirmation_bytes <= 2 * sizeof bytes + 2 * m);
+                }
+            }
+            memset(bytes, values[c], sizeof bytes);
+            for (i = m - 1; i < sizeof bytes; i += m)
+                bytes[i] = (char)other;
+            confirmations = 0;
+            kmp_bytes = 0;
+            assert(find(cu_str_n(bytes, sizeof bytes), 0, &literal) == NO_MATCH);
+            assert(confirmations == 0 && kmp_bytes == 0);
+            memcpy(bytes + sizeof bytes - m, pattern, m);
+            assert(find(cu_str_n(bytes, sizeof bytes), 0, &literal) ==
+                   naive(cu_str_n(bytes, sizeof bytes), 0, literal.text));
+            assert(find(cu_str_n(bytes, sizeof bytes), (size_t)-1, &literal) == NO_MATCH);
+            cu_arena_release(&arena);
+        }
+    }
+}
+
 static void test_optional_numbering(void)
 {
     CuArena a;
@@ -352,6 +405,9 @@ static void test_optional_numbering(void)
     s.numbers = 0;
     s.names = 0;
     s.out = stdout;
+    s.write = NULL;
+    s.cancelled = NULL;
+    s.context = NULL;
     text = CU_LIT("before\n\nneedle\n");
     newline_scans = 0;
     lines = 0;
@@ -391,6 +447,7 @@ int main(void)
     test_misleading_anchor();
     test_guided_filters();
     test_fallback();
+    test_uniform_windows();
     test_optional_numbering();
     test_pattern_failure();
     return 0;

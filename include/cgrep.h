@@ -1,7 +1,7 @@
 /*
  * cgrep: ripgrep reimplemented on c-utils, as c-utils' first consumer.
  *
- * Usage: cgrep [-n] PATTERN [PATH...]
+ * Usage: cgrep [-n] [-j N] PATTERN [PATH...]
  *
  * Prints the lines containing PATTERN (a literal byte string, for now),
  * using ripgrep-style non-terminal text output: a bare line for
@@ -17,8 +17,13 @@
  *
  * Exit status: 0 if any line matched, 1 if none did, 2 if any error
  * occurred. Input failures are reported on err and later paths searched;
- * observed output failures stop further input. POSIX SIGPIPE may terminate
- * the CLI instead of returning 2. Earlier output is not rolled back.
+ * observed output failures stop serial input or cancel prefetched workers.
+ * Explicit -j1 through -j8 preserve argv-order output; default is serial.
+ * Linux/glibc >= 2.34 regular-file workers have private input windows and
+ * bounded 64 KiB output channels. Other targets and stdin/nonregular inputs
+ * stay serial. Every started worker is joined before returning; a regular
+ * file read may delay cancellation. POSIX SIGPIPE may terminate the CLI
+ * instead of returning 2. Earlier output is not rolled back.
  */
 #ifndef CGREP_H
 #define CGREP_H

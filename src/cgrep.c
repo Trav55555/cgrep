@@ -13,7 +13,7 @@
 #define CGREP_KMP_STEP() ((void)0)
 #endif
 
-static const char usage[] = "usage: cgrep [-n] PATTERN [PATH...]\n";
+static const char usage[] = "usage: cgrep [-n] [-j N] PATTERN [PATH...]\n";
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
@@ -27,6 +27,9 @@ typedef struct {
     int numbers; /* -n: prefix each line with its number */
     int names;   /* prefix each line with its input's name */
     FILE *out;
+    int (*write)(void *context, const char *bytes, size_t n);
+    int (*cancelled)(void *context);
+    void *context;
 } Search;
 
 static int literal_init(Literal *literal, CuArena *a, CuStr text)
@@ -118,6 +121,46 @@ static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
     return find_end(chunk, 0, literal, state) != NO_MATCH;
 }
 
+/* Uniform patterns: every non-pattern byte blocks all starts through it.
+ * Two failed full comparisons advance at least one pattern length; discovery
+ * scans are capped at that length. Total search work remains linear. */
+static size_t find_uniform(CuStr hay, size_t start, CuStr needle)
+{
+    size_t at;
+    size_t last;
+    size_t j;
+    size_t span;
+    const char *p;
+    unsigned char byte;
+
+    at = start;
+    last = hay.len - needle.len;
+    byte = (unsigned char)needle.ptr[0];
+    while (at <= last) {
+        if ((unsigned char)hay.ptr[at + needle.len - 1] != byte) {
+            at += needle.len;
+            continue;
+        }
+        if ((unsigned char)hay.ptr[at] != byte) {
+            span = last - at + 1;
+            if (span > needle.len)
+                span = needle.len;
+            p = (const char *)memchr(hay.ptr + at, byte, span);
+            if (p == NULL)
+                return NO_MATCH;
+            at = (size_t)(p - hay.ptr);
+            continue;
+        }
+        if (memcmp(hay.ptr + at, needle.ptr, needle.len) == 0)
+            return at;
+        j = needle.len - 1;
+        while (j != 0 && (unsigned char)hay.ptr[at + j] == byte)
+            j--;
+        at += j + 1;
+    }
+    return NO_MATCH;
+}
+
 /* First occurrence at or after start. Inspect the first failed candidate
  * once to suggest an expected byte that actually mismatched. Each filter
  * gets at most eight false confirmations, then KMP bounds remaining work. */
@@ -142,6 +185,8 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
         p = (const char *)memchr(hay.ptr + start, (unsigned char)needle.ptr[0], hay.len - start);
         return p == NULL ? NO_MATCH : (size_t)(p - hay.ptr);
     }
+    if (literal->alternate == literal->anchor)
+        return find_uniform(hay, start, needle);
     last = hay.len - needle.len;
     at = start;
     rejects = 0;
@@ -175,19 +220,62 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
     return NO_MATCH;
 }
 
-/* Newlines in text[from, to). */
+/* Count with bounded word batches only after repeated nearby newlines. */
 static unsigned long count_lines(CuStr text, size_t from, size_t to)
 {
     const char *p;
     const char *end;
+    const char *found;
+    const char *batch;
     unsigned long n;
+    unsigned long word;
+    unsigned long ones;
+    unsigned long low;
+    unsigned long high;
+    unsigned long mask;
+    size_t span;
+    unsigned dense;
+    int words;
 
     n = 0;
+    dense = 0;
     p = text.ptr + from;
     end = text.ptr + to;
-    while (p < end && (p = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
+    /* Match both value width and object size before interpreting copied bytes.
+     * Other representations retain the character-only path. */
+    words = CHAR_BIT == 8 &&
+        ((sizeof word == 4 && ULONG_MAX == 0xffffffffUL) ||
+         (sizeof word == 8 && ULONG_MAX > 0xffffffffUL &&
+          ULONG_MAX / 0xffffffffUL == 0xffffffffUL + 2UL));
+    ones = ULONG_MAX / 255UL;
+    low = ones * 127UL;
+    high = ones * 128UL;
+    while (p < end && (found = (const char *)memchr(p, '\n', (size_t)(end - p))) != NULL) {
         n++;
-        p++;
+        dense = found - p < 64 ? (dense < 4 ? dense + 1 : 4) : 0;
+        p = found + 1;
+        if (words && dense == 4) {
+            span = (size_t)(end - p);
+            if (span > 256)
+                span = 256;
+            batch = p + span;
+            while ((size_t)(batch - p) >= sizeof word) {
+                memcpy(&word, p, sizeof word);
+                word ^= ones * (unsigned long)'\n';
+                /* No carry escapes a byte's low seven bits. Unlike a borrow-
+                 * based has-zero test, adjacent 0/1 bytes cannot overcount.
+                 * Unsigned multiplication collects the lane flags modulo the
+                 * word width; the highest byte holds their sum (at most 8). */
+                mask = ~(((word & low) + low) | word | low) & high;
+                n += ((mask >> 7) * ones) >> ((sizeof word - 1) * CHAR_BIT);
+                p += sizeof word;
+            }
+            while (p < batch) {
+                n += *p == '\n';
+                p++;
+            }
+            dense = 0;
+        }
     }
     return n;
 }
@@ -221,14 +309,30 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
             seen += count_lines(text, counted, start);
             counted = start;
         }
-        if (s->names)
-            fprintf(s->out, "%s:", name);
-        if (s->numbers)
-            fprintf(s->out, "%lu:", seen + 1);
-        fwrite(text.ptr + start, 1, end - start, s->out);
-        fputc('\n', s->out);
-        if (ferror(s->out))
-            return -1;
+        if (s->write != NULL) {
+            char number[sizeof(unsigned long) * CHAR_BIT + 2];
+            int digits;
+
+            if (s->names &&
+                (!s->write(s->context, name, strlen(name)) || !s->write(s->context, ":", 1)))
+                return -1;
+            if (s->numbers) {
+                digits = sprintf(number, "%lu:", seen + 1);
+                if (!s->write(s->context, number, (size_t)digits))
+                    return -1;
+            }
+            if (!s->write(s->context, text.ptr + start, end - start) || !s->write(s->context, "\n", 1))
+                return -1;
+        } else {
+            if (s->names)
+                fprintf(s->out, "%s:", name);
+            if (s->numbers)
+                fprintf(s->out, "%lu:", seen + 1);
+            fwrite(text.ptr + start, 1, end - start, s->out);
+            fputc('\n', s->out);
+            if (ferror(s->out))
+                return -1;
+        }
         matched = 1;
         if (end == text.len)
             break;
@@ -245,7 +349,8 @@ typedef enum {
     SCAN_MEMORY,
     SCAN_LINE_LIMIT,
     SCAN_RANGE,
-    SCAN_OUTPUT
+    SCAN_OUTPUT,
+    SCAN_CANCELLED
 } ScanError;
 
 typedef struct {
@@ -264,6 +369,16 @@ static int add_bytes(unsigned long *total, size_t n)
 
 static int binary_warning(const Search *s, const char *name, unsigned long offset)
 {
+    if (s->write != NULL) {
+        char warning[sizeof(unsigned long) * CHAR_BIT + 64];
+        int n;
+
+        if (s->names &&
+            (!s->write(s->context, name, strlen(name)) || !s->write(s->context, ": ", 2)))
+            return -1;
+        n = sprintf(warning, "binary file matches (found \"\\0\" byte around offset %lu)\n", offset);
+        return s->write(s->context, warning, (size_t)n) ? 1 : -1;
+    }
     if (s->names)
         fprintf(s->out, "%s: ", name);
     fprintf(s->out, "binary file matches (found \"\\0\" byte around offset %lu)\n", offset);
@@ -312,6 +427,10 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         return result;
     }
     for (;;) {
+        if (s->cancelled != NULL && s->cancelled(s->context)) {
+            result.error = SCAN_CANCELLED;
+            break;
+        }
         if (buffer->len == buffer->cap && buffer->cap < STREAM_LINE_LIMIT) {
             if (!cu_vec_reserve(buffer, 1)) {
                 result.error = SCAN_MEMORY;
@@ -423,6 +542,8 @@ static const char *scan_error(ScanResult result)
         return "input exceeds byte-offset range";
     case SCAN_OUTPUT:
         return "output error";
+    case SCAN_CANCELLED:
+        return "cancelled";
     case SCAN_OK:
         break;
     }
@@ -463,6 +584,23 @@ static int search_input(const Search *s, const char *path, FILE *in, FILE *err, 
     return result.matched;
 }
 
+#include "parallel.inc"
+
+static int worker_count(const char *text)
+{
+    int n;
+
+    n = 0;
+    if (*text == '\0')
+        return 0;
+    while (*text != '\0') {
+        if (*text < '0' || *text > '9' || n > 8)
+            return 0;
+        n = n * 10 + (*text++ - '0');
+    }
+    return n >= 1 && n <= 8 ? n : 0;
+}
+
 int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 {
     Search s;
@@ -474,14 +612,33 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     int r;
     int matched;
     int failed;
+    int jobs;
 
     s.numbers = 0;
     s.out = out;
+    s.write = NULL;
+    s.cancelled = NULL;
+    s.context = NULL;
+    jobs = 1;
     i = 1;
     while (i < argc && argv[i][0] == '-' && argv[i][1] != '\0') {
         if (strcmp(argv[i], "--") == 0) {
             i++;
             break;
+        }
+        if (strncmp(argv[i], "-j", 2) == 0) {
+            if (argv[i][2] != '\0')
+                jobs = worker_count(argv[i] + 2);
+            else if (i + 1 < argc)
+                jobs = worker_count(argv[++i]);
+            else
+                jobs = 0;
+            if (jobs == 0) {
+                fputs("cgrep: worker count must be 1 through 8\n", err);
+                return 2;
+            }
+            i++;
+            continue;
         }
         if (strcmp(argv[i], "-n") != 0) {
             fprintf(err, "cgrep: unknown flag %s\n%s", argv[i], usage);
@@ -508,6 +665,12 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     cu_arena_init(&input_arena);
     CU_VEC_INIT(&buffer, &input_arena, char);
     s.names = argc - i > 1;
+    if (jobs > 1 && argc - i > 1 &&
+        parallel_search(&s, argv + i, argc - i, jobs, in, out, err, &r)) {
+        cu_arena_release(&input_arena);
+        cu_arena_release(&pattern_arena);
+        return r;
+    }
     matched = 0;
     failed = 0;
     if (i == argc) {

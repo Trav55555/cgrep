@@ -7,7 +7,7 @@ when cgrep needs them.
 
 ## Establish the baseline
 
-- [ ] Re-run correctness and performance checks against the current implementation.
+- [x] Re-run correctness and warm explicit-file performance checks against the current implementation.
   Update [verification.md](verification.md) with commands, versions, results,
   and remaining gaps. Compare absent literals, late matches, repetitive
   candidates, and many small files. Record peak memory as well as elapsed time.
@@ -34,7 +34,7 @@ when cgrep needs them.
 
 ## Make task lifetimes explicit
 
-- [ ] Prototype a scoped, bounded worker pool for independent file searches.
+- [x] Prototype a scoped, bounded worker pool for independent file searches.
   Keep platform threads behind a small API. A scope owns and joins every task
   it starts. Give each worker its own temporary storage. Keep pattern storage
   alive until all workers finish, and document which data is read-only.
@@ -44,7 +44,7 @@ when cgrep needs them.
 
 ## Transfer work without sharing mutable state
 
-- [ ] Add bounded job and result queues when the worker prototype needs them.
+- [x] Add bounded job and result queues when the worker prototype needs them.
   Define whether each message copies data or transfers ownership. Document
   queue closure and behavior when a producer or consumer stops. Use one output
   writer. Decide output ordering and bound buffered results, including when an
@@ -55,7 +55,7 @@ when cgrep needs them.
 
 ## Cancel and shut down predictably
 
-- [ ] Add cooperative cancellation and deadlines to the parallel-search path.
+- [ ] Extend implemented cooperative cancellation with deadlines.
   Stop submitting work after cancellation. Wake blocked queue operations and
   join workers before releasing their storage. Preserve continued search for
   ordinary input failures. Define when output failure stops the entire search.
@@ -66,7 +66,7 @@ when cgrep needs them.
 
 ## Check the concurrency contract
 
-- [ ] Add deterministic scheduling tests and a separate race-detection build.
+- [x] Add deterministic scheduling tests and a separate race-detection build.
   Keep single-threaded search logic testable without the worker runtime.
   Seed a data race to verify that the race detector fails. Report unavailable
   tools as skipped checks, not passes. Keep native concurrency tests separate

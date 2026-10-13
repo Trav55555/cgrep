@@ -2,8 +2,9 @@
 
 Streaming input, the selective matcher, and optional line counting pass
 the native and wasm gates. Boundary, memory-budget, error, and fuzz checks
-support the implementation. The project remains partially verified: deep
-checks have tool failures. Mismatch-guided selection closes the measured
+support the implementation. Deep checks pass with private repaired tools and
+an explicitly bounded Cerberus suite. Full-corpus semantics verification
+remains incomplete because the large suites exceed local resource limits. Mismatch-guided selection closes the measured
 two- and three-hot-byte gaps. The tested corpus is not evidence of universal
 performance parity or a formal correctness proof.
 
@@ -14,6 +15,8 @@ heavy checks sequentially under an outer memory cap when the devbox is
 unavailable.
 
 ```sh
+make verify
+# Individual checks for targeted work:
 make test difftest iotest
 make check
 python3 -I tests/difftest.py build/cgrep --cases 3000 --seed 7
@@ -27,6 +30,252 @@ checks output and status before timing and shuffles program order each
 round. `make mutate` returns nonzero for surviving mutations, including
 functional equivalents and tuning changes. Its regular-file limit does
 not bound subprocess pipe captures, so the outer memory cap matters.
+
+## Ordered parallel-search acceptance
+
+Opt-in `-j1` through `-j8` now passes full acceptance on Linux/glibc.
+The backend uses private input windows and fixed 64 KiB channels, preserves
+argv-order output/diagnostics, continues after input failures, cancels on
+output failure, and joins every started worker. Default remains serial;
+stdin/nonregular inputs and unsupported targets stay serial.
+
+`make verify` passed in `build/verify.e3SwYZ`, with 90.77% cgrep coverage
+and 91.76% dependency coverage, both above the unchanged 90% floor. Required
+matrix/analyzer/ASan/UBSan/MSan/release/wasm/Valgrind/fuzz checks passed.
+All 12,000 generated comparisons passed: seeds 7 and 42, 3000 cases each
+at `-j1` and `-j8`, compared against ordered streaming ripgrep.
+
+Native tests inject pool allocation, synchronization initialization, partial
+thread creation, input-window allocation, open/read/close failures, and
+nonregular races. They compare ordered output and read/close diagnostics,
+count every created/joined thread, and check descriptors before/after each
+scope. A raced FIFO plus a full later channel exercises cancellation wakeups.
+TSan and ASan/UBSan/LSan run the required native backend. A compiled,
+barrier-started race control is rejected 3/3 times; ordering, dropped-status,
+and missing-cancellation mutants also compile and fail their behavioral
+sensors. Missing native support/tools cannot silently pass those checks.
+
+Eight workers scan seven 64 MiB regular files plus a later matching input
+under a 32 MiB address-space cap. Parallel line-limit and allocation refusal
+checks retain the later match; failed output returns status 2 and joins.
+Nonregular fallback still avoids opening a later blocking FIFO after output
+failure. These budgets are concrete bounded-line scenarios, not a total
+memory bound independent of line length or worker count.
+
+The initial stdio-cookie bridge caused an MSan diagnostic at an
+uninstrumented libc buffer boundary and regressed heavy output. Direct
+writer callbacks removed that boundary without suppression. Callback
+framing, numbering, and each writer-failure position also pass wasm and
+bounded Cerberus checks. Cerberus does not interpret pthreads; the fourth
+semantic harness makes that exclusion explicit. Independent concurrency
+review remains unavailable. Toolchain `make selftest` prints `selftest: PASS`,
+including feature definitions before forced headers and continued rejection
+of GNU `alloca` calls.
+
+Raw logs are in `/tmp/cgrep-parallel-scope.laLQae`; durable performance
+samples are in `docs/performance-parallel.json`. See
+[performance](docs/PERFORMANCE.md) for the remaining single-file, small-match,
+and output-heavy gaps. No commits or pushes occurred; CI execution and
+cold-I/O/traversal/mixed-repository coverage remain unfinished.
+
+## Historical serial optimization evidence
+
+Uniform literals use a blocking-byte search rather than entering scalar KMP
+after eight failed confirmations. A terminal mismatch skips a full window;
+otherwise the rightmost mismatch blocks all candidate starts through it.
+Discovery spans are at most the pattern length, and two failed full comparisons
+advance at least one pattern length. This preserves O(input + pattern) work
+without changing the immutable literal or persistent binary KMP state.
+
+Line counting preserves `memchr` for sparse inputs and switches only after
+four nearby LF bytes to a bounded 256-byte word batch. Copies establish safe
+unaligned loads into declared unsigned-long objects. Checked value/object
+widths enable only full 32/64-bit words with 8-bit bytes; other representations
+retain character-only counting. The mask prevents cross-byte borrow errors,
+and unsigned modular lane summation is intentional.
+
+Scratch plain-unroll counters lost performance; an always-on word counter
+helped dense input but nearly doubled sparse-input time. Those candidates
+were rejected. The bounded adaptive counter retains sparse/mixed performance
+in the measured cases. Final seven-repetition, randomized paired 64 MiB runs
+against the frozen control show:
+
+| Case | Before | Selected | GNU grep | rg -j8 |
+| --- | ---: | ---: | ---: | ---: |
+| Uniform, plain | 89.43 ms | 9.50 ms | 13.25 ms | 29.10 ms |
+| Uniform, numbered | 102.39 ms | 17.44 ms | 21.60 ms | 30.68 ms |
+| Medium absent, numbered | 20.34 ms | 17.74 ms | 20.94 ms | 5.37 ms |
+| Medium late match, numbered | 19.96 ms | 17.69 ms | 21.17 ms | 5.47 ms |
+
+Ordinary numbered scans improve about 11–13%. A 21-repeat remeasurement of
+ordinary medium absent and small late-match cases gives essentially identical
+before/after medians. Heavy matching output is roughly unchanged, not improved.
+This meets the strongest-competitor target on the uniform stress case only;
+parallel ripgrep remains ahead on ordinary multi-file and output-heavy cases.
+
+The full `make verify` acceptance profile passes on the selected source.
+Cgrep coverage is 94.08% above the unchanged 90% floor; dependency coverage
+remains 91.76%. Compiler matrix, analyzer, ASan/UBSan, MSan, release, wasm,
+bounded semantics, Valgrind, exact-output fuzzing, native budgets, and all
+6000 differential comparisons pass. The first run stopped on an analyzer
+diagnostic in the new zero-length allocation fixture; initializing the entire
+one-byte empty allocation fixed that fixture without suppressing diagnostics.
+
+New uniform tests cover blockers, offsets, lengths, NUL/high bytes, terminal
+matches, and full-comparison work. Count tests use exact-size allocations,
+unaligned offsets, partial tails, density changes, all byte values, and
+adjacent LF/VT lanes. Compiled uniform-overstep, borrow-mask, and lane-sum
+mutations fail natively and under Cerberus. The deep run completes 2,024,205
+finder and 14,856 framing executions in its configured ten-second budgets.
+
+Raw candidates, sensitivity logs, sparse/mixed probes, paired samples, and
+acceptance are in `/tmp/cgrep-serial-prototypes.iigr0Q` and
+`build/verify.okbYkH`. Final executable SHA-256 is
+`d373ff111410fb77380d981de8b80b20c541efaec57449408f7c02e764eec04b`.
+No commits or pushes occurred. The unrelated c-utils arena formatting and
+concurrent edits to the older benchmark were preserved. Full-corpus semantics,
+other representations/platforms, cold I/O, and universal performance parity
+remain unverified. The subsequent parallel slice is recorded above.
+
+## Durable-profile evidence
+
+`make verify` now selects the source-pinned, hash-validated private checker
+profile automatically. `dcheck-tools build` fetched the exact Cerberus commit,
+applied the repair patch, built the engine and all private runtime objects,
+verified the Valgrind archive, and rebuilt/installed it with baseline ISA
+flags. It published the profile under `~/.local/opt/dcheck-tools/` only after
+positive and negative probes passed. System Homebrew/opam packages were not
+replaced. The second build reused and revalidated that profile.
+
+Full acceptance passes with `DCHECK_CERBERUS`, `OPAM_SWITCH_PREFIX`, and
+`VALGRIND_LIB` overrides removed, and with all temporary PATH entries removed.
+Normal permanent prerequisites such as zig remain required. A deliberately
+minimal PATH hid zig, and acceptance correctly rejected the required wasm
+SKIP rather than reporting a weaker pass. Integrity tests reject stale
+policy, changed binaries, extra files, external symlinks, changed pins, and
+unusable launchers. The artifact hashes and tool probes are local integrity
+and behavior evidence, not a signed security attestation or a proof of
+checker correctness.
+
+The installed profile is approximately 147 MiB, with a retained 545 MiB
+build cache. Build and acceptance remain memory-capped, sequential, and
+core-dump-free. Receipts are in `/tmp/cgrep-durable-tools.b6sLBY` and the new
+`build/verify.*` acceptance directory. Temporary receipts are not dependencies
+of the installed launchers. This remains a Linux x86_64 profile with pinned
+direct opam dependencies and recorded system/transitive dependencies, not a
+hermetic cross-platform distribution. No commits or pushes were performed.
+
+## Acceptance coverage
+
+`make verify` is the resource-capped acceptance entry point. It runs c-utils'
+unit suite and gate, checks `cmd/main.c`, validates required dcheck receipts,
+replays the exact-output framing oracle and compiled output mutants, runs
+cgrep deep checks, rebuilds the executable, and runs native I/O budgets and
+3000 differential cases each with seeds 7 and 42 at both `-j1` and `-j8`,
+plus failure-sensitive native worker/race checks. Required checks cannot
+silently disappear or become SKIPs. Authority, regions, absent CBMC proofs,
+and optional tcc are explicitly outside this profile.
+
+The framing fuzzer now checks exact bytes, path/number prefixes, first-NUL
+warnings, match/error results, partial output, and stopping behavior. Its
+reference scans the original input with naive matching and commits complete
+lines at observed delivery boundaries. It does not call the production
+finder, KMP, buffer, line-count, or formatting helpers. Known-output fixtures
+calibrate the reference separately, including blank lines, unterminated tails,
+NUL delivery suppression, earlier printed output, and failed reads.
+
+Checked-in startup corpora contain four finder seeds and fourteen framing
+seeds. Framing seeds reach 196622 bytes and include long-line growth, matching
+across real refill boundaries, late NULs, and read errors. Per-harness sidecars
+set input limits to 512 and 262144 bytes. dcheck copies seeds into writable
+build corpora and logs the effective limits and seed counts; it never mutates
+source seeds. The large-seed selftest is caught by fuzz alone.
+
+The complete acceptance run passes with the explicit private repaired tools.
+Both compiler/sanitizer/release/wasm gates pass. Dependency coverage is 91.76%
+and cgrep coverage remains 93.09%, both above their unchanged 90% floors.
+The 64 MiB regular-file and pipe checks pass under a 32 MiB address-space cap;
+line limits, allocation recovery, output-device failure, and stopping before
+a later blocking input pass. All 6000 ripgrep comparisons agree.
+
+Native and ASan/UBSan/LSan framing replay passes all fourteen seeds and the
+known-output fixtures. Three compiled output mutants are rejected by the
+output oracle: removing LF, shifting line numbers, and shifting the NUL offset.
+Toolchain selftest passes. The deep fuzz stage completes 2,409,908 finder and
+9,446 framing executions in its configured ten-second budgets; the lower
+framing throughput reflects larger inputs and a stronger oracle, not weaker
+coverage requirements. A separate fifteen-second framing run also passes.
+
+Receipts are under `build/verify.*` and `/tmp/cgrep-acceptance.cPILdm`.
+Production sources and the original full native suites are unchanged. This
+closes the identified acceptance/oracle/refill gaps, not all possible gaps.
+Random fuzzing remains time-bounded and concrete, Cerberus remains scoped to
+small harnesses, and the 8 MiB boundary stays in the native suite rather than
+the framing fuzzer. General performance parity remains unproven.
+
+## Earlier bounded-semantics evidence
+
+`dcheck.conf` selects three harnesses in `semantics/`. The CLI harness runs
+its existing suite unchanged. The finder enumerates haystacks and needles
+up to two bytes over two byte values, plus targeted inputs up to 68 bytes.
+The streaming harness uses payloads up to 24 bytes and short reads up to
+seven bytes. Production chunk sizes and line limits are not overridden.
+See [semantics/README.md](semantics/README.md) for the claim map and exclusions.
+
+The full native test files and both fuzz sources are unchanged. `make test`
+and dcheck's native gates also compile and run the new harnesses. dcheck
+reports `dedicated harnesses: semantics (3 files); full tests retained in
+native checks` in text and JSON instead of implying full-corpus semantics.
+
+With the private launchers from `/tmp/cgrep-deep-tools.rrut4W`, the complete
+`dcheck deep --json` run returned status `pass`, no failures, and explicit
+skips for authority, regions, and absent CBMC proofs. The compiler matrix,
+analyzer, ASan/UBSan, MSan, release, wasm, bounded semantics, full Valgrind,
+and both fuzz targets passed. Line coverage remained 93.09%. Installed tools
+were not replaced, so this receipt requires those explicit private tools.
+
+Toolchain `make selftest` passes. Its seeded regressions verify dedicated
+suite selection, default full-test selection, native-test retention,
+empty-suite rejection, zero-exit diagnostic rejection, and JSON scope.
+The bounded-suite sensitivity script checks baselines and rejects two
+compiled mutants natively and under Cerberus: excluding a valid empty-search
+start, and suppressing the scanner's read-error classification. The initial
+CLI-only stream assertions missed the latter because close recovered the
+error; a direct scanner-result assertion now rejects the same defect.
+No production fix or original-test reduction was needed.
+
+Receipts are in `/tmp/cgrep-bounded-semantics.kTAzwU`, including `deep.json`,
+`sensitivity-final.log`, and `toolchain-selftest.log`. All heavy work remained
+sequential under the 3 GiB/no-swap cap with core dumps disabled. This is
+bounded concrete-execution evidence, not a formal correctness proof or
+full-input-domain semantics verification.
+
+## Earlier full-corpus tool attempt
+
+Isolated builds and probes are in `/tmp/cgrep-deep-tools.rrut4W`. Installed
+tools remain unchanged. The experimental Cerberus patch and build notes
+are preserved in the sibling toolchain's `docs/checker-repairs/` directory.
+
+- Valgrind 3.27.1 rebuilt with baseline x86-64 GCC flags passes the CLI,
+  finder, and streaming suites with full leak checking and error exit 99.
+  The 65536-byte `memset` probe passes, and a deliberate heap overrun exits 99.
+- The private Cerberus build passes the complete CLI test, seven focused
+  positive probes, and negative wrong-order and heap-overrun checks. Repairs
+  cover mixed buffered output, `strerror`, `size_t` rank conversion, byte
+  decoding, and redundant append-descriptor checks. Its virtual filesystem
+  is seeded with `/tmp`; no product code or tests changed to hide failures.
+- A complete deep attempt passed the compiler matrix, analyzer, ASan/UBSan,
+  MSan, release, wasm, and coverage gates. Coverage remained 93.09%.
+  Authority and regions stayed explicit skips. Cerberus's full finder suite
+  then exceeded 300 seconds, and its streaming suite reached the scoped
+  3 GiB OOM limit. The attempt ended before Valgrind, fuzz, or CBMC ran.
+- Native `make test` and the three Valgrind runs passed separately after
+  that interrupted attempt. They are not a completed deep receipt. No tests
+  were reduced, failed diagnostics suppressed, or resource limits raised.
+
+The private patch is not evidence of general checker correctness, other-ABI
+parity, CHERI coverage, or independent review. Full semantics verification
+still needs a larger environment or explicitly scoped bounded harnesses.
 
 ## Current mismatch-guided evidence
 
@@ -208,8 +457,9 @@ of `vgpreload_memcheck-amd64-linux.so` shows EVEX `vpbroadcastq` at offset
 not a completed leak check. The installed checker was not patched and the
 tests were not reduced to hide it.
 
-Cerberus remains blocked by its absent virtual `/tmp` and incorrect mixed
-buffered `fwrite`/`fprintf` ordering. A requested independent review could
+At this earlier streaming checkpoint, Cerberus was blocked by its absent
+virtual `/tmp` and incorrect mixed buffered `fwrite`/`fprintf` ordering.
+A requested independent review could
 not run because the delegated provider rejected its token/credit budget.
 The receipts above are executed checks and main-thread review, not an
 independent review or formal proof.
@@ -346,8 +596,9 @@ search are absent. Detailed error wording differs from ripgrep. POSIX SIGPIPE ca
 rather than returning output-error status 2. Native Windows and exotic
 integer-width ABIs remain unverified.
 
-Deep verification remains blocked by Cerberus's missing virtual `/tmp`
-and its incorrect mixed buffered `fwrite`/`fprintf` ordering. Minimal
-reproductions are in `/tmp/cgrep-deep.zE6slH`; no tests or gates were
-weakened to hide those failures. Earlier file-reader and toolchain evidence
-remains in `/tmp/cgrep-resume-checks.bW2Hhj`.
+Bounded semantics passes with the private tools, but full Cerberus
+verification still exceeds the 300-second finder limit and 3 GiB streaming
+memory cap. Installed tools retain their original failures. Current receipts are in
+`/tmp/cgrep-deep-tools.rrut4W`; original reproductions are in
+`/tmp/cgrep-deep.zE6slH`. No tests or gates were weakened. Earlier file-reader
+and toolchain evidence remains in `/tmp/cgrep-resume-checks.bW2Hhj`.
