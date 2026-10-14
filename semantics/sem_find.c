@@ -128,6 +128,8 @@ static void word_count_corner(void)
             expected++;
     }
     assert(count_lines(cu_str_n(bytes, sizeof bytes), 0, sizeof bytes) == expected);
+    memset(bytes, '\n', sizeof bytes);
+    assert(count_lines(cu_str_n(bytes, sizeof bytes), 0, sizeof bytes) == (unsigned long)sizeof bytes);
     memset(bytes, 'a', sizeof bytes);
     for (i = 31; i < sizeof bytes; i += 32)
         bytes[i] = '\n';

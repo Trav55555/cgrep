@@ -233,6 +233,8 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
     unsigned long low;
     unsigned long high;
     unsigned long mask;
+    unsigned long lanes;
+    const char *word_end;
     size_t span;
     unsigned dense;
     int words;
@@ -260,15 +262,21 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
                 span = 256;
             batch = p + span;
             while ((size_t)(batch - p) >= sizeof word) {
-                memcpy(&word, p, sizeof word);
-                word ^= ones * (unsigned long)'\n';
-                /* No carry escapes a byte's low seven bits. Unlike a borrow-
-                 * based has-zero test, adjacent 0/1 bytes cannot overcount.
-                 * Unsigned multiplication collects the lane flags modulo the
-                 * word width; the highest byte holds their sum (at most 8). */
-                mask = ~(((word & low) + low) | word | low) & high;
-                n += ((mask >> 7) * ones) >> ((sizeof word - 1) * CHAR_BIT);
-                p += sizeof word;
+                span = (size_t)(batch - p) / sizeof word;
+                if (span > 16)
+                    span = 16;
+                word_end = p + span * sizeof word;
+                /* At most 16 copied words: each byte lane sums to <=16,
+                 * and the final byte sum is <=128, never wrapping at 256. */
+                lanes = 0;
+                while (p < word_end) {
+                    memcpy(&word, p, sizeof word);
+                    word ^= ones * (unsigned long)'\n';
+                    mask = ~(((word & low) + low) | word | low) & high;
+                    lanes += mask >> 7;
+                    p += sizeof word;
+                }
+                n += (lanes * ones) >> ((sizeof word - 1) * CHAR_BIT);
             }
             while (p < batch) {
                 n += *p == '\n';
@@ -280,6 +288,19 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
     return n;
 }
 
+static CuStr number_prefix(char *end, unsigned long value)
+{
+    char *p;
+
+    p = end;
+    *--p = ':';
+    do {
+        *--p = (char)('0' + value % 10UL);
+        value /= 10UL;
+    } while (value != 0);
+    return cu_str_n(p, (size_t)(end - p));
+}
+
 /* Search a complete-line window, or the final unterminated tail. *lines
  * counts LF bytes before this window. -1 means an observed output error. */
 static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
@@ -289,13 +310,21 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
     size_t start;
     size_t end;
     size_t counted;
+    size_t name_len;
+    size_t output_len;
+    char number[sizeof(unsigned long) * CHAR_BIT + 2];
+    CuStr prefix;
     unsigned long seen;
     int matched;
+    int numbers;
 
     matched = 0;
     pos = 0;
     counted = 0;
     seen = *lines;
+    numbers = s->numbers;
+    prefix = cu_str_n("", 0);
+    name_len = s->names ? strlen(name) : 0;
     while (pos < text.len && (m = find(text, pos, &s->literal)) != NO_MATCH) {
         /* pos is always a line's start, so the match's line starts there
          * or after it. */
@@ -305,31 +334,32 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
         end = m;
         while (end < text.len && text.ptr[end] != '\n')
             end++;
-        if (s->numbers) {
+        if (numbers) {
             seen += count_lines(text, counted, start);
             counted = start;
         }
+        output_len = end - start;
+        if (end < text.len)
+            output_len++;
+        if (numbers)
+            prefix = number_prefix(number + sizeof number, seen + 1);
         if (s->write != NULL) {
-            char number[sizeof(unsigned long) * CHAR_BIT + 2];
-            int digits;
-
             if (s->names &&
-                (!s->write(s->context, name, strlen(name)) || !s->write(s->context, ":", 1)))
+                (!s->write(s->context, name, name_len) || !s->write(s->context, ":", 1)))
                 return -1;
-            if (s->numbers) {
-                digits = sprintf(number, "%lu:", seen + 1);
-                if (!s->write(s->context, number, (size_t)digits))
-                    return -1;
-            }
-            if (!s->write(s->context, text.ptr + start, end - start) || !s->write(s->context, "\n", 1))
+            if (numbers && !s->write(s->context, prefix.ptr, prefix.len))
+                return -1;
+            if (!s->write(s->context, text.ptr + start, output_len) ||
+                (end == text.len && !s->write(s->context, "\n", 1)))
                 return -1;
         } else {
             if (s->names)
                 fprintf(s->out, "%s:", name);
-            if (s->numbers)
-                fprintf(s->out, "%lu:", seen + 1);
-            fwrite(text.ptr + start, 1, end - start, s->out);
-            fputc('\n', s->out);
+            if (numbers)
+                fwrite(prefix.ptr, 1, prefix.len, s->out);
+            fwrite(text.ptr + start, 1, output_len, s->out);
+            if (end == text.len)
+                fputc('\n', s->out);
             if (ferror(s->out))
                 return -1;
         }
@@ -338,7 +368,7 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
             break;
         pos = end + 1;
     }
-    if (s->numbers)
+    if (numbers)
         *lines = seen + count_lines(text, counted, text.len);
     return matched;
 }

@@ -176,8 +176,8 @@ static JobState worker_scan(ParallelWorker *worker, CuVec *buffer)
             }
         }
     }
-    if (worker->used != 0)
-        worker_publish(worker);
+    /* Terminal publication transfers any residual bytes with the result.
+     * Tiny files need no separate chunk/ack round trip. */
     worker->result = result;
     return JOB_DONE;
 }
@@ -253,6 +253,7 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
     int matched;
     int failed;
     int attr_ready;
+    size_t used;
     JobState state;
 
     if (!regular_paths(paths, count))
@@ -327,15 +328,22 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
             for (;;) {
                 while (worker->state != JOB_CHUNK && worker->state != JOB_DONE && worker->state != JOB_SERIAL)
                     worker_wait(worker);
-                if (worker->state != JOB_CHUNK)
-                    break;
-                if (fwrite(worker->bytes, 1, worker->used, out) != worker->used || fflush(out) != 0 || ferror(out)) {
+                state = worker->state;
+                used = worker->used;
+                if (used != 0) {
+                    /* CHUNK/DONE ownership freezes these bytes until ack.
+                     * No output I/O while holding the shared pool mutex. */
                     pool_unlock(pool);
-                    failed = 1;
-                    fputs("cgrep: output error\n", err);
-                    goto joined_cleanup;
+                    if (fwrite(worker->bytes, 1, used, out) != used || fflush(out) != 0 || ferror(out)) {
+                        failed = 1;
+                        fputs("cgrep: output error\n", err);
+                        goto joined_cleanup;
+                    }
+                    pool_lock(pool);
+                    worker->used = 0;
                 }
-                worker->used = 0;
+                if (state != JOB_CHUNK)
+                    break;
                 worker->state = JOB_RUNNING;
                 worker_signal(worker);
             }

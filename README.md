@@ -47,8 +47,10 @@ length) memory. Search work is O(input length + pattern length), including
 preparation. Line counting runs only when `-n` requests it. After four nearby
 newlines, it counts at most 256 bytes using exact word-lane masks, then returns
 to `memchr`. Byte loads use `memcpy`; word counting is enabled only for checked
-32/64-bit unsigned-long representations with 8-bit bytes. Other representations
-retain character-only counting.
+32/64-bit unsigned-long representations with 8-bit bytes. Up to 16 words share
+one lane reduction, with no byte-lane carry. Other representations retain
+character-only counting. The Linux CLI uses a 64 KiB stdout buffer for
+non-TTY output only; caller-owned library streams keep their existing setup.
 
 ## Streaming limits and binary input
 
@@ -75,8 +77,8 @@ use blocking stdio and may read ahead; immediate interactive output is not
 promised. Partial output from
 earlier windows remains visible after a later input failure.
 
-Recursive traversal, regex, ignore rules, terminal formatting, and parallel
-search are not implemented.
+Recursive traversal, regex, ignore rules, and terminal formatting are not
+implemented.
 
 ## Build and verification
 
@@ -98,7 +100,7 @@ python3 -I tests/benchmark_parallel.py build/cgrep --mib 64 --repeats 7 --number
 ```
 
 `make verify` runs c-utils' own tests and gate, checks the CLI entry point,
-replays the framing oracle and its three output mutants, runs cgrep's deep
+replays the framing oracle and its four output mutants, runs cgrep's deep
 checks, and checks the actual executable with I/O budgets and 3000 differential
 cases each for seeds 7 and 42. It rejects missing required checks or unexpected
 skips. Authority, regions, absent CBMC proofs, and optional tcc remain outside
@@ -117,6 +119,10 @@ prerequisites and regression probes. Missing or stale profiles fail rather
 than falling back to the known-broken installed checkers.
 Receipts are written under `build/verify.*`. This target checks correctness
 and resource behavior, not benchmark parity.
+
+[Gitea acceptance CI](ci/README.md) uses a dedicated trusted repository
+runner and complete source pins. Check the latest Gitea job and acceptance
+receipts before treating a published revision as CI-verified.
 
 The broader [performance baseline and target](docs/PERFORMANCE.md) includes
 GNU grep and ripgrep at `-j1`, `-j2`, `-j4`, `-j8`, and default threads. It
@@ -175,7 +181,6 @@ mutations; their reasoning is recorded in [verification.md](verification.md).
 2. A regex parser and Thompson NFA.
 3. A lazy DFA, prefilters, and benchmarks against ripgrep.
 4. Ignore rules, including `.gitignore`.
-5. A platform thread pool and parallel file search.
 
 See [Runtime TODOs](TODO.md) for error contracts, resource limits, scoped
 workers, bounded queues, cancellation, and concurrency verification.

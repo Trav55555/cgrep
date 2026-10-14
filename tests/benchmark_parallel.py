@@ -22,8 +22,10 @@ import time
 
 def reference_output(name, data, pattern, names, numbers):
     chunks = []
-    for number, line in enumerate(data.splitlines(keepends=True), 1):
-        body = line[:-1] if line.endswith(b"\n") else line
+    lines = data.split(b"\n")
+    if not data or data.endswith(b"\n"):
+        lines.pop()
+    for number, body in enumerate(lines, 1):
         if pattern in body:
             prefix = (name.encode() + b":" if names else b"")
             if numbers:
@@ -40,8 +42,11 @@ def validate_output(result, expected, file_order, parallel):
         if result.stdout != b"".join(expected[name] for name in file_order):
             raise RuntimeError("exact output or serial file ordering mismatch")
         return
+    if result.stdout and not result.stdout.endswith(b"\n"):
+        raise RuntimeError("unterminated output line")
     actual = {name: bytearray() for name in file_order}
-    for line in result.stdout.splitlines(keepends=True):
+    for body in result.stdout.split(b"\n")[:-1]:
+        line = body + b"\n"
         name = line.split(b":", 1)[0].decode("ascii")
         if name not in actual:
             raise RuntimeError("unexpected output path: " + name)
@@ -63,6 +68,9 @@ def commands(binary, pattern, paths, numbers, gnu_grep, baseline=None, cgrep_thr
     result["rg-default"] = [*common, "--", pattern, *paths]
     if baseline:
         result["baseline"] = [baseline, *numbering, "--", pattern, *paths]
+        if cgrep_threads:
+            for threads in [1, 2, 4, 8]:
+                result[f"baseline-j{threads}"] = [baseline, *numbering, f"-j{threads}", "--", pattern, *paths]
     return result
 
 

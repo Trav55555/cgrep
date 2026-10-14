@@ -1,0 +1,21 @@
+name: Cgrep acceptance
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cgrep-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    if: github.event_name == 'push' && github.repository == 'trav/cgrep' && github.actor == 'trav'
+    runs-on: cgrep-x86_64-3g
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Full capped acceptance with pinned siblings
+        run: bash ci/verify.sh

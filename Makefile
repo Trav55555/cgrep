@@ -21,7 +21,7 @@ $(BUILD)/cgrep: cmd/main.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/in
 test: $(TESTS)
 	@for t in $(TESTS); do echo "$$t"; "$$t" || exit 1; done
 
-$(BUILD)/test_%: tests/test_%.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
+$(BUILD)/test_%: tests/test_%.c cmd/main.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ $< $(SRCS)
 
 $(BUILD)/sem_%: semantics/sem_%.c $(wildcard tests/test_*.c) $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)

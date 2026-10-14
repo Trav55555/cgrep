@@ -49,9 +49,11 @@ rejects that same mutant. The production code was not changed.
 
 The serial optimization sensors additionally run through
 `tests/serial_sensitivity.py`. Overstepping a uniform blocker, using a
-borrow-propagating zero-byte mask, and shifting the lane sum incorrectly all
-compile and fail behavioral assertions natively and under Cerberus. Full
-counting/alignment cases also run in the native suite's `test_count.c`.
+borrow-propagating zero-byte mask, shifting the lane sum incorrectly, and
+allowing a lane batch large enough to overflow all compile and fail behavioral
+assertions natively and under Cerberus. A 300-byte all-LF case calibrates the
+batch-overflow sensor; the mixed fixture alone missed it. Full counting and
+alignment cases also run in the native suite's `test_count.c`.
 
 ## Limits
 

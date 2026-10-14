@@ -31,7 +31,62 @@ round. `make mutate` returns nonzero for surviving mutations, including
 functional equivalents and tuning changes. Its regular-file limit does
 not bound subprocess pipe captures, so the outer memory cap matters.
 
-## Ordered parallel-search acceptance
+## Output, counting, and Gitea follow-up acceptance
+
+Full acceptance finished in the pinned-Gitea-source pilot directory
+`/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc`, with receipts
+under `cgrep/build/verify.fhAgl4`. Cgrep coverage is 91.23% and dependency
+coverage is 91.78%, above the unchanged 90% floors. All required compiler,
+analyzer, sanitizer, MSan, release, wasm, Valgrind, bounded-semantics, fuzz,
+framing, worker, and I/O-budget checks passed. The four differential runs
+passed all 12,000 cases at `-j1` and `-j8`. Toolchain selftests also passed.
+The measured executable SHA-256 is
+`7ff504edb9f59d8381933a882c666f4df0f1c6a26afde9af4934d701569b0351`.
+
+Terminal worker publication now includes residual output bytes. The
+coordinator drops the pool mutex during output I/O while retaining ownership
+of the published channel until acknowledgment or reassignment. Existing
+native ordered-output, startup/read/close failure, cancellation, descriptor,
+thread-join, TSan, and compiled worker-mutation sensors pass on this change.
+The race control still fails 3/3 runs. This is executed native evidence,
+not independent concurrency review or semantic interpretation of pthreads.
+
+Decimal-prefix tests compare zero, powers-of-ten boundaries, and `ULONG_MAX`
+with independent stdio formatting. Exact-size native word-count fixtures
+cover byte values, alignment, tails, and density changes. A fourth compiled
+serial mutant raises the lane batch bound enough to overflow the final byte
+sum. The original mixed semantic fixture missed it. An all-LF case within
+the existing 300-byte bound now rejects it natively and under Cerberus;
+no bound, check, or coverage floor was relaxed. Numbering and LF framing
+continue to pass the independent output oracle and large startup fuzz seeds.
+After acceptance, an additional compiled missing-inline-LF mutant also
+fails the framing oracle, covering the new combined body/LF write directly.
+
+The CLI fixture checks that TTY output keeps its setup, non-TTY output
+requests a 64 KiB buffer, and setup refusal returns status 2 before scanning.
+Portable targets retain the existing setup. Native output-device errors,
+pipe/file budgets, and stopping before later blocking inputs also pass.
+Borrowed library streams are not reconfigured.
+
+Broader benchmark checks reject wrong same-length bytes in both file and
+pipe sinks, unterminated output, and LF/CR/VT framing errors. Each realistic
+profile validates complete timed output. Seven-round paired plain/numbered
+sweeps and the 21-round numbered remeasurement retain every raw sample.
+`docs/performance-followup.json` embeds reports, source/binary identity,
+validated JSON receipts, acceptance logs, and exact-output traces. Wall
+results were contended; targeted cache advice does not prove cold physical
+I/O. See [performance](docs/PERFORMANCE.md).
+
+The Gitea source fetcher verifies complete pinned Git trees after safe
+archive extraction. Tests reject tampering and unsafe paths, and confirm
+that logged shell pipelines preserve failure. Before publication, the
+trusted-push workflow had no server-triggered result. The local pilot reached full
+acceptance PASS after its outer tool call timed out; the wrapper's terminal
+exit status is not claimed. CI infrastructure uses a dedicated repository
+runner, while the existing general runner remains unchanged. See
+[CI setup](ci/README.md).
+
+## Published ordered parallel-search acceptance
 
 Opt-in `-j1` through `-j8` now passes full acceptance on Linux/glibc.
 The backend uses private input windows and fixed 64 KiB channels, preserves
@@ -75,8 +130,10 @@ of GNU `alloca` calls.
 Raw logs are in `/tmp/cgrep-parallel-scope.laLQae`; durable performance
 samples are in `docs/performance-parallel.json`. See
 [performance](docs/PERFORMANCE.md) for the remaining single-file, small-match,
-and output-heavy gaps. No commits or pushes occurred; CI execution and
-cold-I/O/traversal/mixed-repository coverage remain unfinished.
+and output-heavy gaps. That implementation was subsequently published as
+`5d8497a` and copied to Gitea. The follow-up above adds explicit mixed and
+uneven content, pipe output, and file-cache advice. A server-triggered CI
+run, physical cold-I/O proof, and traversal coverage remain unfinished.
 
 ## Historical serial optimization evidence
 

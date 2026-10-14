@@ -27,7 +27,78 @@ Captures before and after timing validate exact per-file bytes and line order;
 only ripgrep may reorder files. Timed output lengths and statuses are checked.
 The validator rejects lost, duplicated, and reordered lines or wrong statuses.
 
-## Verified opt-in parallel slice
+## Verified output and counting follow-up
+
+The follow-up combines final channel bytes with job completion, releases the
+pool mutex during output I/O, formats decimal prefixes without `sprintf`,
+and emits an existing LF with its line body. The Linux CLI gives non-TTY
+stdout a fixed 64 KiB buffer. TTY buffering and borrowed library streams keep
+their existing setup. Dense counting reduces at most 16 copied words together;
+the byte-lane total stays below 256. Sparse counting still uses `memchr`.
+
+Seven randomized paired rounds against the published executable include
+all fixed cgrep and ripgrep worker counts. The workstation was contended;
+these wall medians are evidence for this run, not stable-host guarantees.
+The gap-focused rows below use milliseconds. All cases, samples, aggregate
+CPU times, versions, hashes, and further profiles are in
+`performance-followup.json`.
+
+| Workload | Before -j1 | Selected -j1 | Before -j8 | Selected -j8 | GNU grep | rg -j8 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Single absent, numbered | 23.82 | 22.16 | 23.04 | 22.95 | 25.48 | 12.68 |
+| Medium absent, numbered | 22.23 | 20.65 | 6.97 | 7.62 | 24.81 | 7.32 |
+| Small late match, plain | 13.02 | 12.68 | 24.66 | 17.92 | 10.46 | 10.59 |
+| Small late match, numbered | 14.67 | 15.75 | 44.62 | 23.34 | 14.65 | 14.34 |
+| Heavy output, plain | 31.72 | 27.41 | 28.37 | 25.15 | 28.93 | 18.65 |
+| Heavy output, numbered | 51.80 | 37.21 | 54.59 | 36.76 | 43.85 | 26.58 |
+
+Heavy numbered output improves about 28% serial and 33% at eight workers.
+One exact-output trace reduces serial heavy-output writes from 3440 to 224.
+The traced small-match run reduces futex calls from 20342 to 6779; this
+schedule-dependent count is not a guarantee. Traced timings are not the
+benchmark timings.
+
+A separate 21-round numbered remeasurement gives small-match serial
+15.20 to 14.50 ms and eight workers 39.91 to 24.74 ms. Medium absent serial
+improves 24.87 to 22.85 ms, while eight-worker wall time is roughly unchanged,
+13.82 to 14.09 ms. Its aggregate child CPU falls 26.10 to 24.55 ms. This
+limits the apparent small serial regression and medium worker slowdown in
+the first sweep; it does not establish universal nonregression.
+
+The overall target remains unmet. Single-file numbering and small matching
+files still trail strong competitors. Worker selection stays explicit.
+
+### Broader explicit-file profiles
+
+`benchmark_realistic.py` adds mixed line shapes, unequal sizes, and copied
+real-repository text. Seven rounds cover plain/numbered output to regular
+files and fully collected pipes, plus targeted cache advice on ext4. Every
+timed invocation checks all output bytes and status. The repository manifest
+records source names, hashes, exclusions, HEAD, and dirty state; reproducing
+a dirty snapshot requires the matching working tree. Generated arguments
+use ASCII filenames, so this does not measure original repository path costs
+or any search tool's directory traversal.
+
+```sh
+python3 -I tests/test_realistic_benchmark.py
+python3 -I tests/benchmark_realistic.py build/cgrep --baseline /path/to/control --work-root /path/on/chosen/filesystem --numbers --sink pipe --output mixed-pipe.json
+python3 -I tests/benchmark_realistic.py build/cgrep --baseline /path/to/control --work-root /path/on/chosen/filesystem --case repository --repository ../c-utils --pattern cu_ --cache advise-cold --output repository-advised.json
+```
+
+The file-cache advice uses `fsync` and `POSIX_FADV_DONTNEED` only on generated
+copies before each invocation, outside timing. It never drops global caches.
+It is not proof of physically cold I/O. Pipe output is collected by the
+parent, whose work contributes to wall time but not aggregate child CPU.
+These new profiles do not establish terminal performance or universal parity.
+
+The measured executable is the accepted pinned-dependency build,
+SHA-256 `7ff504edb9f59d8381933a882c666f4df0f1c6a26afde9af4934d701569b0351`.
+[Verification](../verification.md) records source identity and acceptance;
+[Gitea CI](../ci/README.md) distinguishes local evidence from server-triggered
+workflow results. Retain raw reports with
+`tests/record_followup.py --evidence /path/to/reports --acceptance /path/to/ci-scratch --output docs/performance-followup.json`.
+
+## Published opt-in parallel slice
 
 Linux/glibc >= 2.34 regular-file searches now support 1 through 8 workers,
 with argv-order output and fixed 64 KiB per-worker channels. Default remains

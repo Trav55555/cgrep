@@ -55,8 +55,9 @@ def main():
         if args.sensitivity:
             for name, old, new in [
                 ("missing-newline", "        fputc('\\n', s->out);", "        /* seeded missing newline */"),
-                ("wrong-number", 'fprintf(s->out, "%lu:", seen + 1);',
-                 'fprintf(s->out, "%lu:", seen + 2);'),
+                ("missing-inline-newline", "            output_len++;", "            output_len += 0;"),
+                ("wrong-number", 'number_prefix(number + sizeof number, seen + 1);',
+                 'number_prefix(number + sizeof number, seen + 2);'),
                 ("wrong-nul-offset", "nul_offset = read_base + (unsigned long)(nul - destination);",
                  "nul_offset = read_base + (unsigned long)(nul - destination) + 1;")
             ]:

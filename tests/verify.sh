@@ -39,6 +39,8 @@ python3 -I tests/test_receipt.py
 python3 -I tests/framing_check.py --cutils "$CUTILS" --sensitivity
 python3 -I tests/serial_sensitivity.py --cutils "$CUTILS" --cerberus "$DCHECK_CERBERUS"
 python3 -I tests/test_parallel_benchmark.py
+python3 -I tests/test_realistic_benchmark.py
+python3 -I tests/test_ci.py
 python3 -I tests/parallel_check.py --cutils "$CUTILS"
 "$DCHECK" deep --json > "$receipt/cgrep.json" || {
   python3 -I tests/check_receipt.py "$receipt/cgrep.json" deep; exit 1;

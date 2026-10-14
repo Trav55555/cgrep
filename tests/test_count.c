@@ -90,8 +90,30 @@ static void test_density_changes(void)
     assert(count_lines(cu_str_n(storage, sizeof storage), 0, sizeof storage) == 5);
 }
 
+static void test_number_prefix(void)
+{
+    static const unsigned long values[] = {0, 1, 9, 10, 99, 100, 999, 1000, ULONG_MAX / 10, ULONG_MAX};
+    char *storage;
+    char expected[sizeof(unsigned long) * CHAR_BIT + 2];
+    CuStr actual;
+    size_t i;
+    size_t size;
+
+    size = sizeof expected;
+    storage = (char *)malloc(size);
+    assert(storage != NULL);
+    for (i = 0; i < sizeof values / sizeof values[0]; i++) {
+        assert(sprintf(expected, "%lu:", values[i]) > 0);
+        actual = number_prefix(storage + size, values[i]);
+        assert(actual.len == strlen(expected));
+        assert(memcmp(actual.ptr, expected, actual.len) == 0);
+    }
+    free(storage);
+}
+
 int main(void)
 {
+    test_number_prefix();
     test_boundaries();
     test_byte_values();
     test_density_changes();

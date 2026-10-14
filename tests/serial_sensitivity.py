@@ -47,6 +47,7 @@ def main():
         ("uniform-overstep", "tests/test_find.c", "at += needle.len;", "at += needle.len + 1;"),
         ("borrow-mask", "tests/test_count.c", "~(((word & low) + low) | word | low) & high", "(word - ones) & ~word & high"),
         ("lane-sum", "tests/test_count.c", "((sizeof word - 1) * CHAR_BIT)", "((sizeof word - 1) * CHAR_BIT - 1)"),
+        ("lane-batch-overflow", "tests/test_count.c", "if (span > 16)\n                    span = 16;", "if (span > 64)\n                    span = 64;"),
     ]
     with tempfile.TemporaryDirectory(prefix="cgrep-serial-sensitivity-") as directory:
         work = Path(directory)

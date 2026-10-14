@@ -20,8 +20,8 @@ selection remains serial until the measured behavior justifies automatic use.
 Choose memory channels with a direct scanner writer callback. The initial
 `fopencookie` adapter regressed output-heavy workloads and crossed an
 uninstrumented libc buffer boundary that MSan could not track. Replacing it
-keeps channel copies instrumented, without diagnostic suppression. Serial
-FILE formatting remains unchanged. The Linux/glibc >= 2.34 backend retains
+keeps channel copies instrumented, without diagnostic suppression. Both sinks
+now use the same decimal-prefix formatter and preserve the same output bytes. The Linux/glibc >= 2.34 backend retains
 C89 syntax. Compiler feature defines must precede the
 forced poison header, which already includes system stdio. Portable targets
 retain serial search. No system package or published artifact changes.
@@ -55,8 +55,12 @@ parallel_search(search, paths, count, jobs, out, err, status)
 ```
 
 Only the coordinator writes caller stdout/stderr. A channel's bytes are worker
-owned while RUNNING and coordinator owned while CHUNK; publication/acknowledgment
-uses the mutex and condition variables. Ordinary input failures do not cancel
+owned while RUNNING and coordinator owned while CHUNK or DONE. Terminal
+publication includes remaining bytes with the result, avoiding a separate
+tiny-file handoff. Publication/acknowledgment uses the mutex and conditions.
+The coordinator snapshots state and length under the mutex, releases it for
+output I/O, then reacquires it before acknowledging or assigning another
+input. A worker cannot reuse transferred bytes during that I/O. Ordinary input failures do not cancel
 other jobs. Cancellation is checked before each input refill. A blocking regular
 file read can delay a join; instantaneous interruption is not promised.
 
