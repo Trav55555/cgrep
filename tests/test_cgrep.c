@@ -337,6 +337,45 @@ static void test_usage(void)
     assert(strstr(err_text, "--no-such-flag") != NULL && out_text[0] == '\0');
 }
 
+/* Numbered lines whose prefix and body together straddle the CLI's
+ * 256-byte output stage, one body longer than the stage, and a final
+ * line without LF, whose newline is a separate part. */
+static void test_staged_output(void)
+{
+    static const char *const args[] = {"-n", "alpha", "@staged"};
+    static char input[8192];
+    static char expected[8192];
+    size_t in_len;
+    size_t ex_len;
+    size_t body;
+    size_t i;
+    unsigned long line;
+
+    in_len = 0;
+    ex_len = 0;
+    line = 0;
+    for (body = 245; body <= 263; body = body == 262 ? 600 : body + 1) {
+        line++;
+        ex_len += (size_t)sprintf(expected + ex_len, "%lu:", line);
+        memcpy(input + in_len, "alpha", 5);
+        for (i = 5; i < body; i++)
+            input[in_len + i] = (char)('a' + i % 23);
+        input[in_len + body] = '\n';
+        memcpy(expected + ex_len, input + in_len, body + 1);
+        in_len += body + 1;
+        ex_len += body + 1;
+        if (body == 600)
+            break;
+    }
+    memcpy(input + in_len, "alpha end", 9);
+    in_len += 9;
+    ex_len += (size_t)sprintf(expected + ex_len, "%lu:alpha end\n", line + 1);
+    write_file("staged", input, in_len);
+    assert(run(NULL, 3, args) == 0);
+    assert(strlen(out_text) == ex_len && memcmp(out_text, expected, ex_len) == 0);
+    assert(err_text[0] == '\0');
+}
+
 /* Builds without make's revision define report "unknown". */
 static void test_version(void)
 {
@@ -373,6 +412,7 @@ int main(void)
     test_stdin();
     test_usage();
     test_version();
+    test_staged_output();
     test_boundaries_and_explicit_stdin();
     test_literal_shapes();
     test_output_error();

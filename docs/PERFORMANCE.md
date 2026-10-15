@@ -124,7 +124,11 @@ the inner loops compile to the same instructions. One-byte parts no longer
 use `putc_unlocked`, a glibc inline that reads `FILE` fields MemorySanitizer
 cannot see initialized. In 15-21 paired rounds that cost 1.6 ms on
 `mixed-heavy` (38.9 to 40.5 ms) and `matching-output-heavy` (16.3 to
-17.9 ms); absent and common-anchor cases were unchanged. These are not quiet-host results,
+17.9 ms); absent and common-anchor cases were unchanged. The CLI now stages
+parts of up to 256 bytes and writes them with one `fwrite_unlocked` per
+line. In 15 paired rounds on a busy host that changed numbered
+`matching-output-heavy` from 28.6 to 25.1 ms; the other heavy-output cases
+moved less than their noise. These are not quiet-host results,
 and the candidate is neither installed nor published. Its acceptance run is
 recorded in [verification](../verification.md).
 

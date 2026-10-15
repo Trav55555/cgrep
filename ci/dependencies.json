@@ -7,7 +7,7 @@
   },
   "dependable-c-agent-toolchain": {
     "url": "https://git.traversannan.com/trav/dependable-c-agent-toolchain.git",
-    "revision": "b907b6a90d3bdc298724aa846a9d1a03c5600af3",
-    "tree": "7b01df4a25d7d51c1be5419d7134e59bb159b3b1"
+    "revision": "3cc89002b13349004c9430355b4c1a04d02d7f81",
+    "tree": "b4fe3e2f286b7936eb20b50783d1da4a3009160b"
   }
 }

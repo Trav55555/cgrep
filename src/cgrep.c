@@ -523,15 +523,36 @@ static CuStr number_prefix(char *end, unsigned long value)
 #define CGREP_FWRITE fwrite
 #endif
 
+/* Prefix and body parts of a typical line fit together here, so the CLI
+ * makes one stdio call per line. */
+#define EMIT_STAGE 256
+
 /* Zero means an observed output error. */
 static int emit(const Search *s, const CuStr *parts, size_t count)
 {
+    char stage[EMIT_STAGE];
+    size_t used;
     size_t i;
 
     if (s->write != NULL)
         return s->write(s->context, parts, count);
-    for (i = 0; i < count; i++)
-        CGREP_FWRITE(parts[i].ptr, 1, parts[i].len, s->out);
+    used = 0;
+    for (i = 0; i < count; i++) {
+        if (parts[i].len == 0)
+            continue;
+        if (parts[i].len > sizeof stage - used && used != 0) {
+            CGREP_FWRITE(stage, 1, used, s->out);
+            used = 0;
+        }
+        if (parts[i].len > sizeof stage) {
+            CGREP_FWRITE(parts[i].ptr, 1, parts[i].len, s->out);
+        } else {
+            memcpy(stage + used, parts[i].ptr, parts[i].len);
+            used += parts[i].len;
+        }
+    }
+    if (used != 0)
+        CGREP_FWRITE(stage, 1, used, s->out);
     return !ferror(s->out);
 }
 
