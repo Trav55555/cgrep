@@ -1,0 +1,775 @@
+{
+  "schema": "cgrep.paired-quiet-attempt/0",
+  "status": "blocked: no quiet admission; no timing/profiling or optimization started",
+  "identity": {
+    "source_paths": {
+      "installed": "/home/travers/.local/bin/cgrep",
+      "candidate": "/home/travers/projects/cgrep/build/cgrep"
+    },
+    "sha256": {
+      "installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+      "candidate": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3"
+    },
+    "scope": "fixed worker counts, warm explicit files, C locale, complete regular-file output",
+    "timing_claim": "eligible only after unchanged CPU/load admission and during-run checks",
+    "cases": [
+      "single-large-absent",
+      "medium-absent",
+      "medium-late-match",
+      "small-absent",
+      "small-late-match",
+      "matching-output-heavy"
+    ],
+    "limits": "no uniform search, traversal, automatic workers, installation or publication"
+  },
+  "host": {
+    "schema": "cgrep.quiet-benchmark/0",
+    "started_utc": "2026-10-14T05:46:07.793876+00:00",
+    "command": [
+      "bash",
+      "/tmp/cgrep-paired-quiet.62TlECwc/compare.sh"
+    ],
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p2839120-i32177936.scope",
+    "max_background_percent": 10,
+    "max_load_per_cpu": 0.5,
+    "load_gate": "admission only; during-run load includes benchmark workers",
+    "quiet_seconds_required": 5,
+    "limits": "CPU/load admission and during-run monitoring, not isolation or frequency/thermal control",
+    "admission": [
+      {
+        "background_percent": 32.538288364249574,
+        "scope_cpu_seconds": 0.000959,
+        "iowait_percent": 33.97976391231029,
+        "load_per_cpu": 0.3370361328125
+      },
+      {
+        "background_percent": 41.31841659610499,
+        "scope_cpu_seconds": 0.000295,
+        "iowait_percent": 26.418289585097373,
+        "load_per_cpu": 0.35009765625
+      },
+      {
+        "background_percent": 44.4675358649789,
+        "scope_cpu_seconds": 0.000597,
+        "iowait_percent": 26.751054852320674,
+        "load_per_cpu": 0.35009765625
+      },
+      {
+        "background_percent": 48.83156666666667,
+        "scope_cpu_seconds": 0.000212,
+        "iowait_percent": 22.083333333333332,
+        "load_per_cpu": 0.35009765625
+      },
+      {
+        "background_percent": 39.17127211457456,
+        "scope_cpu_seconds": 0.00037,
+        "iowait_percent": 32.43470935130581,
+        "load_per_cpu": 0.35009765625
+      },
+      {
+        "background_percent": 35.4683445945946,
+        "scope_cpu_seconds": 0.000548,
+        "iowait_percent": 36.06418918918919,
+        "load_per_cpu": 0.35009765625
+      },
+      {
+        "background_percent": 28.605151006711413,
+        "scope_cpu_seconds": 0.000266,
+        "iowait_percent": 36.241610738255034,
+        "load_per_cpu": 0.4088541666666667
+      },
+      {
+        "background_percent": 37.05284263959391,
+        "scope_cpu_seconds": 0.000354,
+        "iowait_percent": 28.934010152284262,
+        "load_per_cpu": 0.4088541666666667
+      },
+      {
+        "background_percent": 38.67370653095844,
+        "scope_cpu_seconds": 0.00037,
+        "iowait_percent": 28.074639525021208,
+        "load_per_cpu": 0.4088541666666667
+      },
+      {
+        "background_percent": 44.30790322580645,
+        "scope_cpu_seconds": 0.000529,
+        "iowait_percent": 28.43803056027165,
+        "load_per_cpu": 0.4088541666666667
+      },
+      {
+        "background_percent": 43.84830364715861,
+        "scope_cpu_seconds": 0.000285,
+        "iowait_percent": 29.686174724342667,
+        "load_per_cpu": 0.4088541666666667
+      },
+      {
+        "background_percent": 43.176936026936026,
+        "scope_cpu_seconds": 0.00058,
+        "iowait_percent": 30.05050505050505,
+        "load_per_cpu": 0.4228515625
+      },
+      {
+        "background_percent": 34.15076271186441,
+        "scope_cpu_seconds": 0.00021,
+        "iowait_percent": 34.91525423728813,
+        "load_per_cpu": 0.4228515625
+      },
+      {
+        "background_percent": 35.9971,
+        "scope_cpu_seconds": 0.000348,
+        "iowait_percent": 30.0,
+        "load_per_cpu": 0.4228515625
+      },
+      {
+        "background_percent": 37.53887205387205,
+        "scope_cpu_seconds": 0.000382,
+        "iowait_percent": 32.996632996633,
+        "load_per_cpu": 0.4228515625
+      },
+      {
+        "background_percent": 26.171661073825504,
+        "scope_cpu_seconds": 0.000338,
+        "iowait_percent": 53.439597315436245,
+        "load_per_cpu": 0.4228515625
+      },
+      {
+        "background_percent": 36.81153327716934,
+        "scope_cpu_seconds": 0.000471,
+        "iowait_percent": 27.29570345408593,
+        "load_per_cpu": 0.4423828125
+      },
+      {
+        "background_percent": 35.5198569023569,
+        "scope_cpu_seconds": 0.000241,
+        "iowait_percent": 32.91245791245791,
+        "load_per_cpu": 0.4423828125
+      },
+      {
+        "background_percent": 32.0372934232715,
+        "scope_cpu_seconds": 0.000377,
+        "iowait_percent": 41.73693086003373,
+        "load_per_cpu": 0.4423828125
+      },
+      {
+        "background_percent": 26.09492398648649,
+        "scope_cpu_seconds": 0.000361,
+        "iowait_percent": 42.98986486486486,
+        "load_per_cpu": 0.4423828125
+      },
+      {
+        "background_percent": 39.963344623200676,
+        "scope_cpu_seconds": 0.000329,
+        "iowait_percent": 34.20829805249788,
+        "load_per_cpu": 0.4423828125
+      },
+      {
+        "background_percent": 24.361658206429777,
+        "scope_cpu_seconds": 0.000452,
+        "iowait_percent": 41.370558375634516,
+        "load_per_cpu": 0.487060546875
+      },
+      {
+        "background_percent": 26.607550847457627,
+        "scope_cpu_seconds": 0.000309,
+        "iowait_percent": 46.69491525423729,
+        "load_per_cpu": 0.487060546875
+      },
+      {
+        "background_percent": 28.121604729729732,
+        "scope_cpu_seconds": 0.000402,
+        "iowait_percent": 38.513513513513516,
+        "load_per_cpu": 0.487060546875
+      },
+      {
+        "background_percent": 21.02243902439024,
+        "scope_cpu_seconds": 0.000432,
+        "iowait_percent": 42.64087468460891,
+        "load_per_cpu": 0.487060546875
+      },
+      {
+        "background_percent": 15.570008417508417,
+        "scope_cpu_seconds": 0.000283,
+        "iowait_percent": 37.96296296296296,
+        "load_per_cpu": 0.487060546875
+      },
+      {
+        "background_percent": 27.033240973971456,
+        "scope_cpu_seconds": 0.000341,
+        "iowait_percent": 40.973971452560875,
+        "load_per_cpu": 0.5081380208333334
+      },
+      {
+        "background_percent": 36.54510998307953,
+        "scope_cpu_seconds": 0.000368,
+        "iowait_percent": 48.98477157360406,
+        "load_per_cpu": 0.5081380208333334
+      },
+      {
+        "background_percent": 36.8287383573243,
+        "scope_cpu_seconds": 0.000526,
+        "iowait_percent": 51.989839119390346,
+        "load_per_cpu": 0.5081380208333334
+      },
+      {
+        "background_percent": 51.52121827411167,
+        "scope_cpu_seconds": 0.000192,
+        "iowait_percent": 40.43993231810491,
+        "load_per_cpu": 0.5081380208333334
+      },
+      {
+        "background_percent": 35.3604399323181,
+        "scope_cpu_seconds": 0.000396,
+        "iowait_percent": 52.53807106598985,
+        "load_per_cpu": 0.5081380208333334
+      },
+      {
+        "background_percent": 57.89141765704585,
+        "scope_cpu_seconds": 0.000391,
+        "iowait_percent": 35.568760611205434,
+        "load_per_cpu": 0.63427734375
+      },
+      {
+        "background_percent": 73.20097210481826,
+        "scope_cpu_seconds": 0.000325,
+        "iowait_percent": 20.87912087912088,
+        "load_per_cpu": 0.63427734375
+      },
+      {
+        "background_percent": 44.12021978021978,
+        "scope_cpu_seconds": 0.000578,
+        "iowait_percent": 41.081994928148774,
+        "load_per_cpu": 0.63427734375
+      },
+      {
+        "background_percent": 36.49254022015241,
+        "scope_cpu_seconds": 0.000231,
+        "iowait_percent": 38.69602032176122,
+        "load_per_cpu": 0.63427734375
+      },
+      {
+        "background_percent": 46.52289830508474,
+        "scope_cpu_seconds": 0.000298,
+        "iowait_percent": 38.644067796610166,
+        "load_per_cpu": 0.63427734375
+      },
+      {
+        "background_percent": 43.821023688663274,
+        "scope_cpu_seconds": 0.000355,
+        "iowait_percent": 41.032148900169204,
+        "load_per_cpu": 0.7169596354166666
+      },
+      {
+        "background_percent": 36.59566164154104,
+        "scope_cpu_seconds": 0.000478,
+        "iowait_percent": 45.561139028475715,
+        "load_per_cpu": 0.7169596354166666
+      },
+      {
+        "background_percent": 28.169441624365483,
+        "scope_cpu_seconds": 0.000372,
+        "iowait_percent": 44.923857868020306,
+        "load_per_cpu": 0.7169596354166666
+      },
+      {
+        "background_percent": 25.738585944115158,
+        "scope_cpu_seconds": 0.000273,
+        "iowait_percent": 48.602878916172735,
+        "load_per_cpu": 0.7169596354166666
+      },
+      {
+        "background_percent": 19.5753164556962,
+        "scope_cpu_seconds": 0.000325,
+        "iowait_percent": 62.53164556962025,
+        "load_per_cpu": 0.7169596354166666
+      },
+      {
+        "background_percent": 15.148695286195284,
+        "scope_cpu_seconds": 0.000335,
+        "iowait_percent": 50.84175084175084,
+        "load_per_cpu": 0.7797037760416666
+      },
+      {
+        "background_percent": 19.878368734069667,
+        "scope_cpu_seconds": 0.000316,
+        "iowait_percent": 49.36278674596432,
+        "load_per_cpu": 0.7797037760416666
+      },
+      {
+        "background_percent": 14.027945900253592,
+        "scope_cpu_seconds": 0.000494,
+        "iowait_percent": 54.437869822485204,
+        "load_per_cpu": 0.7797037760416666
+      },
+      {
+        "background_percent": 23.00350594227504,
+        "scope_cpu_seconds": 0.000187,
+        "iowait_percent": 48.641765704584046,
+        "load_per_cpu": 0.7797037760416666
+      },
+      {
+        "background_percent": 22.012311600338695,
+        "scope_cpu_seconds": 0.000346,
+        "iowait_percent": 48.9415749364945,
+        "load_per_cpu": 0.7797037760416666
+      },
+      {
+        "background_percent": 26.010616554054057,
+        "scope_cpu_seconds": 0.000343,
+        "iowait_percent": 44.42567567567568,
+        "load_per_cpu": 0.7840169270833334
+      },
+      {
+        "background_percent": 32.738054145516074,
+        "scope_cpu_seconds": 0.000362,
+        "iowait_percent": 40.27072758037225,
+        "load_per_cpu": 0.7840169270833334
+      },
+      {
+        "background_percent": 33.162216666666666,
+        "scope_cpu_seconds": 0.000534,
+        "iowait_percent": 43.666666666666664,
+        "load_per_cpu": 0.7840169270833334
+      },
+      {
+        "background_percent": 29.871080168776373,
+        "scope_cpu_seconds": 0.000277,
+        "iowait_percent": 45.31645569620253,
+        "load_per_cpu": 0.7840169270833334
+      },
+      {
+        "background_percent": 29.026455696202532,
+        "scope_cpu_seconds": 0.000365,
+        "iowait_percent": 38.22784810126582,
+        "load_per_cpu": 0.7840169270833334
+      },
+      {
+        "background_percent": 35.494451939291736,
+        "scope_cpu_seconds": 0.000358,
+        "iowait_percent": 41.231028667790895,
+        "load_per_cpu": 0.7812906901041666
+      },
+      {
+        "background_percent": 30.818809931506852,
+        "scope_cpu_seconds": 0.000363,
+        "iowait_percent": 43.49315068493151,
+        "load_per_cpu": 0.7812906901041666
+      },
+      {
+        "background_percent": 19.894210076857384,
+        "scope_cpu_seconds": 0.000388,
+        "iowait_percent": 47.9931682322801,
+        "load_per_cpu": 0.7812906901041666
+      },
+      {
+        "background_percent": 30.014336734693877,
+        "scope_cpu_seconds": 0.000314,
+        "iowait_percent": 44.89795918367347,
+        "load_per_cpu": 0.7812906901041666
+      },
+      {
+        "background_percent": 27.369550847457628,
+        "scope_cpu_seconds": 0.000393,
+        "iowait_percent": 32.71186440677966,
+        "load_per_cpu": 0.7812906901041666
+      },
+      {
+        "background_percent": 45.191239460371,
+        "scope_cpu_seconds": 0.000319,
+        "iowait_percent": 32.54637436762226,
+        "load_per_cpu": 0.8121744791666666
+      },
+      {
+        "background_percent": 26.816040609137055,
+        "scope_cpu_seconds": 0.000344,
+        "iowait_percent": 52.36886632825719,
+        "load_per_cpu": 0.8121744791666666
+      },
+      {
+        "background_percent": 30.479407281964434,
+        "scope_cpu_seconds": 0.000382,
+        "iowait_percent": 45.89331075359864,
+        "load_per_cpu": 0.8121744791666666
+      },
+      {
+        "background_percent": 17.36674536256324,
+        "scope_cpu_seconds": 0.000304,
+        "iowait_percent": 47.807757166947724,
+        "load_per_cpu": 0.8121744791666666
+      },
+      {
+        "background_percent": 28.327858347386172,
+        "scope_cpu_seconds": 0.000316,
+        "iowait_percent": 46.20573355817876,
+        "load_per_cpu": 0.8121744791666666
+      },
+      {
+        "background_percent": 34.84458754208754,
+        "scope_cpu_seconds": 0.000463,
+        "iowait_percent": 42.92929292929293,
+        "load_per_cpu": 0.8138834635416666
+      },
+      {
+        "background_percent": 75.01820253164557,
+        "scope_cpu_seconds": 0.000343,
+        "iowait_percent": 15.18987341772152,
+        "load_per_cpu": 0.8138834635416666
+      },
+      {
+        "background_percent": 40.61932716568545,
+        "scope_cpu_seconds": 0.000362,
+        "iowait_percent": 37.342304457527334,
+        "load_per_cpu": 0.8138834635416666
+      },
+      {
+        "background_percent": 53.55588135593221,
+        "scope_cpu_seconds": 0.000406,
+        "iowait_percent": 31.694915254237287,
+        "load_per_cpu": 0.8138834635416666
+      },
+      {
+        "background_percent": 68.0745469940728,
+        "scope_cpu_seconds": 0.000396,
+        "iowait_percent": 20.914479254868755,
+        "load_per_cpu": 0.8138834635416666
+      },
+      {
+        "background_percent": 50.84810051107325,
+        "scope_cpu_seconds": 0.000433,
+        "iowait_percent": 33.98637137989778,
+        "load_per_cpu": 0.8421630859375
+      },
+      {
+        "background_percent": 45.27397446808511,
+        "scope_cpu_seconds": 0.000308,
+        "iowait_percent": 35.234042553191486,
+        "load_per_cpu": 0.8421630859375
+      },
+      {
+        "background_percent": 43.39604060913705,
+        "scope_cpu_seconds": 0.000588,
+        "iowait_percent": 38.3248730964467,
+        "load_per_cpu": 0.8421630859375
+      },
+      {
+        "background_percent": 42.218015138772074,
+        "scope_cpu_seconds": 0.000278,
+        "iowait_percent": 37.76282590412111,
+        "load_per_cpu": 0.8421630859375
+      },
+      {
+        "background_percent": 28.942079796264856,
+        "scope_cpu_seconds": 0.000623,
+        "iowait_percent": 44.65195246179966,
+        "load_per_cpu": 0.8421630859375
+      },
+      {
+        "background_percent": 41.36299915754002,
+        "scope_cpu_seconds": 0.000212,
+        "iowait_percent": 37.65796124684078,
+        "load_per_cpu": 0.8815104166666666
+      },
+      {
+        "background_percent": 27.28479661016949,
+        "scope_cpu_seconds": 0.000394,
+        "iowait_percent": 44.66101694915254,
+        "load_per_cpu": 0.8815104166666666
+      },
+      {
+        "background_percent": 58.80071609098569,
+        "scope_cpu_seconds": 0.000355,
+        "iowait_percent": 24.34709351305813,
+        "load_per_cpu": 0.8815104166666666
+      },
+      {
+        "background_percent": 45.57361415332772,
+        "scope_cpu_seconds": 0.000412,
+        "iowait_percent": 29.907329401853413,
+        "load_per_cpu": 0.8815104166666666
+      },
+      {
+        "background_percent": 76.09049663299662,
+        "scope_cpu_seconds": 0.000449,
+        "iowait_percent": 12.289562289562289,
+        "load_per_cpu": 0.8815104166666666
+      },
+      {
+        "background_percent": 43.22812182741117,
+        "scope_cpu_seconds": 0.000436,
+        "iowait_percent": 31.725888324873097,
+        "load_per_cpu": 0.8642985026041666
+      },
+      {
+        "background_percent": 36.55486301369863,
+        "scope_cpu_seconds": 0.000392,
+        "iowait_percent": 35.01712328767123,
+        "load_per_cpu": 0.8642985026041666
+      },
+      {
+        "background_percent": 35.71093537414966,
+        "scope_cpu_seconds": 0.000394,
+        "iowait_percent": 37.15986394557823,
+        "load_per_cpu": 0.8642985026041666
+      },
+      {
+        "background_percent": 29.15887573964497,
+        "scope_cpu_seconds": 0.000505,
+        "iowait_percent": 28.064243448858832,
+        "load_per_cpu": 0.8642985026041666
+      },
+      {
+        "background_percent": 28.860696095076403,
+        "scope_cpu_seconds": 0.00021,
+        "iowait_percent": 40.0679117147708,
+        "load_per_cpu": 0.8642985026041666
+      },
+      {
+        "background_percent": 16.958759493670886,
+        "scope_cpu_seconds": 0.000387,
+        "iowait_percent": 52.23628691983122,
+        "load_per_cpu": 0.8551432291666666
+      },
+      {
+        "background_percent": 35.28629251700681,
+        "scope_cpu_seconds": 0.000332,
+        "iowait_percent": 37.244897959183675,
+        "load_per_cpu": 0.8551432291666666
+      },
+      {
+        "background_percent": 19.675004240882103,
+        "scope_cpu_seconds": 0.000317,
+        "iowait_percent": 46.90415606446141,
+        "load_per_cpu": 0.8551432291666666
+      },
+      {
+        "background_percent": 27.61397804054054,
+        "scope_cpu_seconds": 0.000505,
+        "iowait_percent": 41.722972972972975,
+        "load_per_cpu": 0.8551432291666666
+      },
+      {
+        "background_percent": 22.1822099915326,
+        "scope_cpu_seconds": 0.000281,
+        "iowait_percent": 64.60626587637594,
+        "load_per_cpu": 0.8551432291666666
+      },
+      {
+        "background_percent": 25.696980491942327,
+        "scope_cpu_seconds": 0.000326,
+        "iowait_percent": 49.533502968617476,
+        "load_per_cpu": 0.880126953125
+      },
+      {
+        "background_percent": 32.34215071972904,
+        "scope_cpu_seconds": 0.000392,
+        "iowait_percent": 43.43776460626587,
+        "load_per_cpu": 0.880126953125
+      },
+      {
+        "background_percent": 37.93390451832907,
+        "scope_cpu_seconds": 0.000353,
+        "iowait_percent": 41.2617220801364,
+        "load_per_cpu": 0.880126953125
+      },
+      {
+        "background_percent": 29.826762711864404,
+        "scope_cpu_seconds": 0.000442,
+        "iowait_percent": 32.45762711864407,
+        "load_per_cpu": 0.880126953125
+      },
+      {
+        "background_percent": 30.25932375316991,
+        "scope_cpu_seconds": 0.000322,
+        "iowait_percent": 40.99746407438715,
+        "load_per_cpu": 0.880126953125
+      },
+      {
+        "background_percent": 24.573296610169486,
+        "scope_cpu_seconds": 0.000351,
+        "iowait_percent": 47.3728813559322,
+        "load_per_cpu": 0.9164225260416666
+      },
+      {
+        "background_percent": 22.07835871404399,
+        "scope_cpu_seconds": 0.000338,
+        "iowait_percent": 54.39932318104907,
+        "load_per_cpu": 0.9164225260416666
+      },
+      {
+        "background_percent": 29.0646186440678,
+        "scope_cpu_seconds": 0.000375,
+        "iowait_percent": 48.813559322033896,
+        "load_per_cpu": 0.9164225260416666
+      },
+      {
+        "background_percent": 30.818289585097375,
+        "scope_cpu_seconds": 0.00036,
+        "iowait_percent": 41.405588484335304,
+        "load_per_cpu": 0.9164225260416666
+      },
+      {
+        "background_percent": 35.57889544688027,
+        "scope_cpu_seconds": 0.000343,
+        "iowait_percent": 42.91736930860034,
+        "load_per_cpu": 0.9164225260416666
+      },
+      {
+        "background_percent": 43.23966216216216,
+        "scope_cpu_seconds": 0.000424,
+        "iowait_percent": 34.96621621621622,
+        "load_per_cpu": 0.9231363932291666
+      },
+      {
+        "background_percent": 34.430253807106595,
+        "scope_cpu_seconds": 0.000344,
+        "iowait_percent": 40.947546531302876,
+        "load_per_cpu": 0.9231363932291666
+      },
+      {
+        "background_percent": 30.86260204081633,
+        "scope_cpu_seconds": 0.000558,
+        "iowait_percent": 42.006802721088434,
+        "load_per_cpu": 0.9231363932291666
+      },
+      {
+        "background_percent": 15.91340425531915,
+        "scope_cpu_seconds": 0.000175,
+        "iowait_percent": 44.51063829787234,
+        "load_per_cpu": 0.9231363932291666
+      },
+      {
+        "background_percent": 22.095921501706485,
+        "scope_cpu_seconds": 0.000358,
+        "iowait_percent": 50.7679180887372,
+        "load_per_cpu": 0.9231363932291666
+      },
+      {
+        "background_percent": 27.067591801878734,
+        "scope_cpu_seconds": 0.000385,
+        "iowait_percent": 44.32109308283518,
+        "load_per_cpu": 0.9092610677083334
+      },
+      {
+        "background_percent": 16.90477485131691,
+        "scope_cpu_seconds": 0.000308,
+        "iowait_percent": 50.722175021240446,
+        "load_per_cpu": 0.9092610677083334
+      },
+      {
+        "background_percent": 32.4251273344652,
+        "scope_cpu_seconds": 0.00032,
+        "iowait_percent": 40.40747028862479,
+        "load_per_cpu": 0.9092610677083334
+      },
+      {
+        "background_percent": 30.005672020287406,
+        "scope_cpu_seconds": 0.000329,
+        "iowait_percent": 44.80135249366018,
+        "load_per_cpu": 0.9092610677083334
+      },
+      {
+        "background_percent": 32.885517529215356,
+        "scope_cpu_seconds": 0.000315,
+        "iowait_percent": 37.729549248747915,
+        "load_per_cpu": 0.9092610677083334
+      },
+      {
+        "background_percent": 35.66264755480608,
+        "scope_cpu_seconds": 0.00041,
+        "iowait_percent": 37.35244519392918,
+        "load_per_cpu": 0.9165445963541666
+      },
+      {
+        "background_percent": 50.24760469011726,
+        "scope_cpu_seconds": 0.000436,
+        "iowait_percent": 28.308207705192633,
+        "load_per_cpu": 0.9165445963541666
+      },
+      {
+        "background_percent": 38.78198988195616,
+        "scope_cpu_seconds": 0.000456,
+        "iowait_percent": 37.52107925801012,
+        "load_per_cpu": 0.9165445963541666
+      },
+      {
+        "background_percent": 33.69755292125317,
+        "scope_cpu_seconds": 0.000319,
+        "iowait_percent": 37.510584250635056,
+        "load_per_cpu": 0.9165445963541666
+      },
+      {
+        "background_percent": 26.13916243654822,
+        "scope_cpu_seconds": 0.000351,
+        "iowait_percent": 40.101522842639596,
+        "load_per_cpu": 0.9165445963541666
+      },
+      {
+        "background_percent": 22.1717841971113,
+        "scope_cpu_seconds": 0.000381,
+        "iowait_percent": 52.84621920135939,
+        "load_per_cpu": 0.8898518880208334
+      },
+      {
+        "background_percent": 18.386694915254232,
+        "scope_cpu_seconds": 0.00037,
+        "iowait_percent": 50.932203389830505,
+        "load_per_cpu": 0.8898518880208334
+      },
+      {
+        "background_percent": 20.303152081563297,
+        "scope_cpu_seconds": 0.000319,
+        "iowait_percent": 47.578589634664404,
+        "load_per_cpu": 0.8898518880208334
+      },
+      {
+        "background_percent": 13.077459915611817,
+        "scope_cpu_seconds": 0.000321,
+        "iowait_percent": 42.025316455696206,
+        "load_per_cpu": 0.8898518880208334
+      },
+      {
+        "background_percent": 20.2174703891709,
+        "scope_cpu_seconds": 0.000295,
+        "iowait_percent": 48.30795262267343,
+        "load_per_cpu": 0.8898518880208334
+      },
+      {
+        "background_percent": 22.678052276559868,
+        "scope_cpu_seconds": 0.000383,
+        "iowait_percent": 52.782462057335586,
+        "load_per_cpu": 0.8786214192708334
+      },
+      {
+        "background_percent": 18.355710659898477,
+        "scope_cpu_seconds": 0.000355,
+        "iowait_percent": 56.42978003384095,
+        "load_per_cpu": 0.8786214192708334
+      },
+      {
+        "background_percent": 18.477670886075952,
+        "scope_cpu_seconds": 0.000396,
+        "iowait_percent": 52.9957805907173,
+        "load_per_cpu": 0.8786214192708334
+      },
+      {
+        "background_percent": 16.311851225697378,
+        "scope_cpu_seconds": 0.000308,
+        "iowait_percent": 48.43617920540997,
+        "load_per_cpu": 0.8786214192708334
+      }
+    ],
+    "during": [],
+    "admitted": false,
+    "quiet_eligible": false,
+    "returncode": null
+  },
+  "summary": {
+    "samples": 120,
+    "background_min_percent": 13.077459915611817,
+    "background_median_percent": 32.18972207150027,
+    "background_max_percent": 76.09049663299662
+  },
+  "exit_code": 2,
+  "recipe": "#!/usr/bin/env bash\nset -euo pipefail\nulimit -c 0\nwork=\"/tmp/cgrep-paired-quiet.62TlECwc\"\ncd /home/travers/projects/cgrep\nfor mode in plain numbered; do\n extra=(); if [[ \"$mode\" == numbered ]]; then extra=(--numbers); fi\n python3 -I tests/benchmark_parallel.py \"$work/candidate\" --baseline \"$work/installed\" --cgrep-threads --repeats 21 --case single-large-absent --case medium-absent --case medium-late-match --case small-absent --case small-late-match --case matching-output-heavy \"${extra[@]}\" --output \"$work/$mode.json\" > \"$work/$mode.log\" 2>&1\ndone\n",
+  "admission_log": "Quiet benchmark: not eligible /tmp/cgrep-paired-quiet.62TlECwc/host.json\n",
+  "limits": "unchanged thresholds and memory caps; no busy fallback, installation or publication"
+}

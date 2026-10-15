@@ -8,6 +8,98 @@ remains incomplete because the large suites exceed local resource limits. Mismat
 two- and three-hot-byte gaps. The tested corpus is not evidence of universal
 performance parity or a formal correctness proof.
 
+## Unpublished 2026-10-14 review fixes verification
+
+The [review fixes](docs/PERFORMANCE.md) passed full `make verify` under
+`dcheck-tools exec` (the repaired private valgrind and Cerberus), receipt
+`build/verify.MslDxS`, against the c-utils review fixes, since committed
+unchanged as `2b1b488` and pinned in `ci/dependencies.json`. That
+covers: the c-utils gate, the CLI fast check, framing and serial
+sensitivity with Cerberus, TSan/ASan worker checks with the 3/3 race
+control, all seven worker mutants, the cgrep deep tier, io_test, and
+3000/3000 identical differential cases at `-j1` and `-j8` in each
+profile. Coverage is 92.16%. Authority, regions and CBMC are skipped as
+before; semantics is bounded.
+
+Three earlier attempts failed. Each cause was fixed, not suppressed:
+
+- Lint rejected a `{0}` initializer inside clang's own `mmintrin.h`,
+  reached through `<emmintrin.h>`. The SSE2 code now uses GCC/Clang vector
+  types and `__builtin_ia32_pmovmskb128`; the inner loops compile to the
+  same `pcmpeqb`/`psubb`/`pmovmskb` instructions.
+- MSan reported `putc_unlocked`, a glibc inline that reads `FILE` fields
+  the uninstrumented libc initialized. One-byte parts now use
+  `fwrite_unlocked`, at about 1.6 ms on heavy multi-file output.
+- `fuzz_find.c` still called the `find` helpers moved into the tests; it
+  now defines them and also checks one finder kept across every match.
+- Valgrind's leak check saw four live worker threads because
+  `test_parallel` exceeded dcheck's 30 s per-test limit at nice 15: the
+  fixtures had grown with the 1 MiB slots (18.3 s versus 1.9 s at HEAD).
+  The test now builds with 128 KiB slots, two input chunks each, and
+  takes 2.8 s. Production keeps 1 MiB. The PATH valgrind (brew 3.27.1)
+  still crashes on this CPU, as recorded below, so it is not the oracle.
+- io_test's allocation-refusal case used a 12 MiB address-space limit,
+  which the c-utils in-place growth now fits under. Refusal occurs from
+  6 to 11 MiB serially and 8 to 11 MiB at `-j8`; the test uses 10 MiB.
+
+The c-utils changes had an independent review that found two
+use-after-frees and three arena accounting defects in the new realloc
+growth path. All five were reproduced, fixed with regression tests that
+failed first, and rerun clean under ASan. cgrep re-reads its stream
+buffer after every reserve, so the new `CuVec` contract (growth may free
+the old buffer) holds here.
+
+Performance is still unqualified: the medians in PERFORMANCE.md come
+from a busy workstation, not a quiet host. Nothing is installed.
+
+## Unpublished batched writer verification
+
+The batched writer passed full isolated `make verify`, receipt `verify.2MT7um`,
+against committed c-utils `75748c7`. Required sanitizer/race/error/budget gates,
+all 12,000 ordered comparisons, and bounded portable semantics passed. Coverage
+is 91.59% cgrep / 91.78% dependency, with unchanged floors and optional exclusions.
+[output-batch-followup.json](docs/output-batch-followup.json) retains the evidence.
+The first attempt failed because its isolated snapshot omitted the CI workflow;
+the actual workflow was copied and the full gate rerun, not disabled.
+
+Native fixtures test exact fit, one spare byte, null/empty fragments without
+publication, and a body longer than two channels. Portable fixtures check one
+batch per line/warning, every fragment failure position, and exact partial
+output. Four new body/failure/progress mutants join the existing ordering,
+input-status, and cancellation mutants; all seven were rejected. ASan/UBSan/LSan
+and TSan worker checks and the race detector's 3/3 negative control passed.
+The local executable's `.text` matches the accepted build. Timed prototype
+executables are frozen with exact report hashes; rebuilding the pre-comment
+selected binary recovered its original whole-ELF identity.
+
+The new internal callback borrows at most five fragments synchronously.
+Descriptor/data pointers do not escape the callback. No new owned buffers,
+coordinator states, flush/error boundaries, or 64 KiB channel limits changed.
+Cerberus still does not interpret pthreads. Native tests and a read-only scout
+review are not a concurrency proof. Performance remains unqualified, with no
+installation or publication.
+
+## Unpublished count and filename predecessor verification
+
+The earlier candidate passed full `make verify` against committed c-utils
+`75748c7`, excluding unrelated local dependency edits. All 12,000 ordered
+comparisons and required race/error/budget checks passed; coverage is 91.44%
+cgrep and 91.78% dependency. Receipt: `verify.y000FW` in the isolated acceptance
+snapshot. [The durable record](docs/count-output-followup.json) retains JSON
+receipts and logs. A separate [quiet Spot comparison](docs/spot-qualification.json)
+now records 4,032 validated timed invocations with unchanged accepted C sources
+and frozen binaries. It supports specific numbered/serial-output gains, not
+universal nonregression or competitor parity. No new live Gitea run is claimed.
+
+The native exact-size count oracle now covers 1024-byte boundaries and
+asymmetric word groups. A duplicated fourth load is rejected natively and by
+the existing <=300-byte semantic harness. All four previous serial mutants
+still fail. Filename truncation and a missing filename colon add two output
+mutants; all six fail the independent framing oracle. Literal path fixtures
+include percent signs, colons, spaces, high bytes, and final unterminated lines.
+Callback write positions, worker channels, cancellation and join rules remain
+unchanged. Historical evidence below belongs to its named prior source/binary.
+
 ## Reproduce
 
 Keep c-utils and dependable-c-agent-toolchain beside this checkout. Run

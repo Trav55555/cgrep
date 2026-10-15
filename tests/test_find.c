@@ -36,6 +36,10 @@ static void *pattern_push(CuArena *a, size_t count, size_t size)
 
 int cgrep_find_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 
+/* test_find_simd.c reuses this suite with the native SSE2 filter. */
+#ifndef CGREP_FIND_SIMD
+#define CGREP_NO_SIMD 1
+#endif
 #define CGREP_KMP_STEP() (kmp_bytes++)
 #define memcmp counted_memcmp
 #define memchr counted_memchr
@@ -47,6 +51,26 @@ int cgrep_find_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #undef cu_arena_push
 #undef cgrep_main
 #undef CGREP_KMP_STEP
+
+/* A fresh filter per call. */
+static size_t find(CuStr hay, size_t start, const Literal *literal)
+{
+    Finder f;
+
+    finder_init(&f, literal);
+    return find_with(hay, start, literal, &f);
+}
+
+/* Unfiltered KMP from start; the oracle for the linear fallback. */
+static size_t find_linear(CuStr hay, size_t start, const Literal *literal)
+{
+    size_t state;
+    size_t end;
+
+    state = 0;
+    end = find_end(hay, start, literal, &state);
+    return end == NO_MATCH ? NO_MATCH : end - literal->text.len;
+}
 
 static size_t naive(CuStr hay, size_t start, CuStr needle)
 {
@@ -300,8 +324,7 @@ static void test_fallback(void)
     cu_arena_release(&a);
 
     /* The first failure agrees on "ba", then mismatches the repeated 'b'
-     * at offset 2. Both filters remain hot. The final false candidate's
-     * anchor overlaps the true match, so KMP must resume at start + 1. */
+     * at offset 2. The final false candidate overlaps the true match. */
     memcpy(guided_overlap, "baxa", 4);
     memset(guided_overlap + 4, 'c', 8);
     memset(guided_overlap + 12, 'b', 7);
@@ -311,11 +334,12 @@ static void test_fallback(void)
     confirmations = 0;
     kmp_bytes = 0;
     assert(find(cu_str_n(guided_overlap, sizeof guided_overlap), 0, &literal) == 19);
-    assert(confirmations <= 16 && kmp_bytes != 0);
+    assert(confirmations <= 16);
     cu_arena_release(&a);
 
-    /* Each false candidate agrees on a long prefix. Enough candidates
-     * must cause bounded confirmation work rather than N full comparisons. */
+    /* Each false candidate agrees on a long prefix. Confirmation work must
+     * stay within the input length plus O(pattern), and the filter must
+     * adapt rather than confirm every candidate. */
     memset(needlebuf, 'a', 64);
     needlebuf[64] = 'b';
     needlebuf[65] = 'c';
@@ -332,14 +356,97 @@ static void test_fallback(void)
     cu_arena_init(&a);
     assert(literal_init(&literal, &a, needle));
     confirmations = 0;
+    confirmation_bytes = 0;
     assert(find(hay, 0, &literal) == naive(hay, 0, needle));
-    assert(confirmations <= 16);
+    assert(confirmations < 64 && confirmation_bytes <= len + 4 * needle.len + 256);
     bytes[len - 1] = 'x';
     confirmations = 0;
+    confirmation_bytes = 0;
     assert(find(hay, 0, &literal) == NO_MATCH);
-    assert(confirmations <= 16);
+    assert(confirmations < 64 && confirmation_bytes <= len + 4 * needle.len + 256);
     cu_arena_release(&a);
     free(bytes);
+}
+
+/* Both filters and the learned switch stay hot in random a/b text, so a
+ * bounded KMP window must run. The filter then resumes over a long run of
+ * absent bytes instead of KMP scanning to the end. */
+static void test_window_resumes(void)
+{
+    static const char pattern[] = "aababbabaabbab";
+    char *bytes;
+    CuArena a;
+    Literal literal;
+    CuStr hay;
+    unsigned long x;
+    size_t len;
+    size_t dense;
+    size_t i;
+
+    dense = 8192;
+    len = 65536;
+    bytes = (char *)malloc(len);
+    assert(bytes != NULL);
+    x = 12345;
+    for (i = 0; i < dense; i++) {
+        x = (x * 1103515245UL + 12345UL) & 0x7fffffffUL;
+        bytes[i] = (x >> 16) & 1 ? 'a' : 'b';
+    }
+    memset(bytes + dense, 'c', len - dense);
+    memcpy(bytes + len - (sizeof pattern - 1), pattern, sizeof pattern - 1);
+    hay = cu_str_n(bytes, len);
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, cu_str_n(pattern, sizeof pattern - 1)));
+    confirmations = 0;
+    confirmation_bytes = 0;
+    kmp_bytes = 0;
+    assert(find(hay, 0, &literal) == naive(hay, 0, literal.text));
+    assert(kmp_bytes != 0);
+    assert(kmp_bytes < dense + 2 * (2 * literal.text.len + KMP_WINDOW));
+    /* Confirmation work stays within a constant factor of the input. */
+    assert(confirmation_bytes <= len + 4 * literal.text.len + 256);
+    for (i = 0; i < dense; i += 97) {
+        assert(find(hay, i, &literal) == naive(hay, i, literal.text));
+    }
+    cu_arena_release(&a);
+    free(bytes);
+}
+
+/* A learned filter survives later calls on the same input. */
+static void test_learned_filter_persists(void)
+{
+    char bytes[4096];
+    CuArena a;
+    Literal literal;
+    Finder f;
+    size_t i;
+
+    for (i = 0; i < sizeof bytes; i++)
+        bytes[i] = "bc"[i % 2];
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, CU_LIT("bcaaaaaa")));
+    finder_init(&f, &literal);
+    assert(find_with(cu_str_n(bytes, sizeof bytes), 0, &literal, &f) == NO_MATCH);
+    assert(f.switched);
+    confirmations = 0;
+    kmp_bytes = 0;
+    assert(find_with(cu_str_n(bytes, sizeof bytes), 0, &literal, &f) == NO_MATCH);
+    assert(confirmations == 0 && kmp_bytes == 0);
+    cu_arena_release(&a);
+}
+
+/* Background rank picks a rarely used byte, not the pattern's rarest. */
+static void test_ranked_anchor(void)
+{
+    CuArena a;
+    Literal literal;
+
+    cu_arena_init(&a);
+    assert(literal_init(&literal, &a, CU_LIT("zebrafish")));
+    assert(literal.text.ptr[literal.anchor] == 'z');
+    assert(literal_init(&literal, &a, CU_LIT("e 5")));
+    assert(literal.text.ptr[literal.anchor] == '5' && literal.text.ptr[literal.alternate] == 'e');
+    cu_arena_release(&a);
 }
 
 static void test_uniform_windows(void)
@@ -407,6 +514,7 @@ static void test_optional_numbering(void)
     s.out = stdout;
     s.write = NULL;
     s.cancelled = NULL;
+    s.finder = NULL;
     s.context = NULL;
     text = CU_LIT("before\n\nneedle\n");
     newline_scans = 0;
@@ -416,7 +524,7 @@ static void test_optional_numbering(void)
     s.numbers = 1;
     newline_scans = 0;
     assert(search_text(&s, "input", text, &lines) == 1);
-    assert(newline_scans != 0);
+    assert(lines == 3);
     cu_arena_release(&a);
 }
 
@@ -447,6 +555,9 @@ int main(void)
     test_misleading_anchor();
     test_guided_filters();
     test_fallback();
+    test_window_resumes();
+    test_learned_filter_persists();
+    test_ranked_anchor();
     test_uniform_windows();
     test_optional_numbering();
     test_pattern_failure();

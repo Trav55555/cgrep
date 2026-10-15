@@ -13,28 +13,102 @@
 #define CGREP_KMP_STEP() ((void)0)
 #endif
 
+/* SSE2 is baseline on x86-64, so no runtime dispatch is needed. Other
+ * targets, tcc, Cerberus and CGREP_NO_SIMD builds use the portable code.
+ * GCC/Clang vector types stand in for <emmintrin.h>, whose definitions
+ * the project lint would otherwise check. */
+#if defined(__GNUC__) && defined(__x86_64__) && defined(__SSE2__) && \
+    !defined(__cerb__) && !defined(CGREP_NO_SIMD)
+#define CGREP_SSE2 1
+typedef char Bytes16 __attribute__((vector_size(16)));
+
+static Bytes16 load16(const char *p)
+{
+    Bytes16 v;
+
+    memcpy(&v, p, sizeof v);
+    return v;
+}
+
+static Bytes16 splat16(char c)
+{
+    char b[16];
+
+    memset(b, c, sizeof b);
+    return load16(b);
+}
+
+/* One bit per byte lane equal in both comparisons (pmovmskb). */
+static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
+{
+    return (unsigned)__builtin_ia32_pmovmskb128((Bytes16)(a == b) & (Bytes16)(c == d));
+}
+#endif
+
+/* KMP scans at most this many bytes beyond twice the pattern length
+ * before the candidate filter resumes. */
+#define KMP_WINDOW ((size_t)4096)
+
 static const char usage[] = "usage: cgrep [-n] [-j N] PATTERN [PATH...]\n";
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
-    size_t anchor;
-    size_t alternate; /* same as anchor when all bytes are identical */
+    size_t anchor;   /* rarest byte by background rank */
+    size_t alternate; /* rarest other byte value; same as anchor when uniform */
     size_t *prefix; /* arena-owned KMP table, NULL for lengths 0 and 1 */
 } Literal;
+
+/* Mutable filter choice for one input. A candidate must match the pattern
+ * at both offsets. One learned switch persists across calls and windows,
+ * as does the vector pair filter once memchr hits prove dense. */
+typedef struct {
+    size_t first;
+    size_t second;
+    int switched;
+    int vector;
+} Finder;
 
 typedef struct {
     Literal literal;
     int numbers; /* -n: prefix each line with its number */
     int names;   /* prefix each line with its input's name */
     FILE *out;
-    int (*write)(void *context, const char *bytes, size_t n);
+    /* Borrowed fragments are consumed synchronously; zero stops scanning. */
+    int (*write)(void *context, const CuStr *parts, size_t count);
     int (*cancelled)(void *context);
     void *context;
+    Finder *finder; /* per-input filter state; NULL uses a fresh one per window */
 } Search;
+
+/* Background byte frequency ranks: higher is more common. From the memchr
+ * crate's default_rank.rs (Unlicense), built from a mixed text/code/binary
+ * corpus. The input's own distribution is unknown before searching. */
+static const unsigned char byte_rank[UCHAR_MAX + 1] = {
+    55, 52, 51, 50, 49, 48, 47, 46, 45, 103, 242, 66, 67, 229, 44, 43,
+    42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 56, 32, 31, 30, 29, 28,
+    255, 148, 164, 149, 136, 160, 155, 173, 221, 222, 134, 122, 232, 202, 215, 224,
+    208, 220, 204, 187, 183, 179, 177, 168, 178, 200, 226, 195, 154, 184, 174, 126,
+    120, 191, 157, 194, 170, 189, 162, 161, 150, 193, 142, 137, 171, 176, 185, 167,
+    186, 112, 175, 192, 188, 156, 140, 143, 123, 133, 128, 147, 138, 146, 114, 223,
+    151, 249, 216, 238, 236, 253, 227, 218, 230, 247, 135, 180, 241, 233, 246, 244,
+    231, 139, 245, 243, 251, 235, 201, 196, 240, 214, 152, 182, 205, 181, 127, 27,
+    212, 211, 210, 213, 228, 197, 169, 159, 131, 172, 105, 80, 98, 96, 97, 81,
+    207, 145, 116, 115, 144, 130, 153, 121, 107, 132, 109, 110, 124, 111, 82, 108,
+    118, 141, 113, 129, 119, 125, 165, 117, 92, 106, 83, 72, 99, 93, 65, 79,
+    166, 237, 163, 199, 190, 225, 209, 203, 198, 217, 219, 206, 234, 248, 158, 239,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+};
+
+static unsigned rank_at(CuStr text, size_t i)
+{
+    return byte_rank[(unsigned char)text.ptr[i]];
+}
 
 static int literal_init(Literal *literal, CuArena *a, CuStr text)
 {
-    size_t frequency[UCHAR_MAX + 1];
     size_t i;
     size_t matched;
 
@@ -47,23 +121,17 @@ static int literal_init(Literal *literal, CuArena *a, CuStr text)
     literal->prefix = CU_PUSH(a, size_t, text.len);
     if (literal->prefix == NULL)
         return 0;
-    for (i = 0; i < sizeof frequency / sizeof frequency[0]; i++)
-        frequency[i] = 0;
-    for (i = 0; i < text.len; i++)
-        frequency[(unsigned char)text.ptr[i]]++;
-    /* Pattern-local rarity is only a hint about the input. Prefer later
-     * offsets on ties; bound false confirmations before switching to KMP. */
+    /* Background rank is only a hint about the input; search corrects a
+     * hot choice once. Prefer later offsets on ties. */
     for (i = 1; i < text.len; i++) {
-        if (frequency[(unsigned char)text.ptr[i]] <=
-            frequency[(unsigned char)text.ptr[literal->anchor]])
+        if (rank_at(text, i) <= rank_at(text, literal->anchor))
             literal->anchor = i;
     }
     literal->alternate = literal->anchor;
     for (i = 0; i < text.len; i++) {
         if (text.ptr[i] != text.ptr[literal->anchor] &&
             (literal->alternate == literal->anchor ||
-             frequency[(unsigned char)text.ptr[i]] <=
-             frequency[(unsigned char)text.ptr[literal->alternate]]))
+             rank_at(text, i) <= rank_at(text, literal->alternate)))
             literal->alternate = i;
     }
     literal->prefix[0] = 0;
@@ -100,16 +168,6 @@ static size_t find_end(CuStr hay, size_t start, const Literal *literal, size_t *
     }
     *state = matched;
     return NO_MATCH;
-}
-
-static size_t find_linear(CuStr hay, size_t start, const Literal *literal)
-{
-    size_t state;
-    size_t end;
-
-    state = 0;
-    end = find_end(hay, start, literal, &state);
-    return end == NO_MATCH ? NO_MATCH : end - literal->text.len;
 }
 
 static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
@@ -161,20 +219,87 @@ static size_t find_uniform(CuStr hay, size_t start, CuStr needle)
     return NO_MATCH;
 }
 
-/* First occurrence at or after start. Inspect the first failed candidate
- * once to suggest an expected byte that actually mismatched. Each filter
- * gets at most eight false confirmations, then KMP bounds remaining work. */
-static size_t find(CuStr hay, size_t start, const Literal *literal)
+static void finder_init(Finder *f, const Literal *literal)
+{
+    f->first = literal->anchor;
+    f->second = literal->alternate;
+    f->switched = 0;
+    f->vector = 0;
+}
+
+/* First start in [at, last] whose first filter byte matches, or NO_MATCH.
+ * The caller checks the second byte. libc memchr is fastest while the
+ * first byte is actually rare in the input. */
+static size_t first_candidate(CuStr hay, size_t at, size_t last, CuStr needle, const Finder *f)
+{
+    const char *p;
+
+    p = (const char *)memchr(hay.ptr + at + f->first,
+                             (unsigned char)needle.ptr[f->first], last - at + 1);
+    return p == NULL ? NO_MATCH : (size_t)(p - hay.ptr) - f->first;
+}
+
+#ifdef CGREP_SSE2
+/* First start in [at, last] whose bytes at both filter offsets match, or
+ * NO_MATCH. Loads stay inside hay; the tail is checked bytewise. */
+static size_t pair_candidate(CuStr hay, size_t at, size_t last, CuStr needle, const Finder *f)
+{
+    const char *p1;
+    const char *p2;
+    Bytes16 b1;
+    Bytes16 b2;
+    size_t reach;
+    unsigned mask;
+
+    reach = f->first > f->second ? f->first : f->second;
+    p1 = hay.ptr + f->first;
+    p2 = hay.ptr + f->second;
+    b1 = splat16(needle.ptr[f->first]);
+    b2 = splat16(needle.ptr[f->second]);
+    while (at <= last && hay.len - at >= reach + 16) {
+        mask = both_equal(load16(p1 + at), b1, load16(p2 + at), b2);
+        if (mask != 0) {
+            at += (size_t)__builtin_ctz(mask);
+            return at <= last ? at : NO_MATCH;
+        }
+        at += 16;
+    }
+    for (; at <= last; at++) {
+        if (p1[at] == needle.ptr[f->first] && p2[at] == needle.ptr[f->second])
+            return at;
+    }
+    return NO_MATCH;
+}
+
+static size_t candidate(CuStr hay, size_t at, size_t last, CuStr needle, const Finder *f)
+{
+    return f->vector ? pair_candidate(hay, at, last, needle, f) : first_candidate(hay, at, last, needle, f);
+}
+#else
+#define candidate first_candidate
+#endif
+
+/* First occurrence at or after start. Candidates cost a fixed charge plus
+ * the pattern length when confirmed. When that work exceeds the bytes
+ * advanced plus slack, the filter switches once to a byte that actually
+ * mismatched; later, KMP scans one bounded window and the filter resumes.
+ * Each phase's excess is O(pattern length) and each window advances past
+ * at least KMP_WINDOW bytes, so total work stays O(input + pattern). */
+static size_t find_with(CuStr hay, size_t start, const Literal *literal, Finder *f)
 {
     CuStr needle;
     const char *p;
     size_t at;
     size_t last;
-    unsigned rejects;
-    size_t anchor;
+    size_t base;
+    size_t spent;
+    size_t slack;
     size_t suggested;
+    size_t window;
+    size_t state;
+    size_t end;
     size_t j;
-    int switched;
+    size_t hits;
 
     needle = literal->text;
     if (start > hay.len || needle.len > hay.len - start)
@@ -188,36 +313,109 @@ static size_t find(CuStr hay, size_t start, const Literal *literal)
     if (literal->alternate == literal->anchor)
         return find_uniform(hay, start, needle);
     last = hay.len - needle.len;
+    slack = 2 * needle.len + 64;
     at = start;
-    rejects = 0;
-    anchor = literal->anchor;
-    suggested = literal->alternate;
-    switched = 0;
+    base = at;
+    spent = 0;
+    hits = 0;
+    suggested = NO_MATCH;
     while (at <= last) {
-        p = (const char *)memchr(hay.ptr + at + anchor,
-                                (unsigned char)needle.ptr[anchor], last - at + 1);
-        if (p == NULL)
+        at = candidate(hay, at, last, needle, f);
+        if (at == NO_MATCH)
             return NO_MATCH;
-        at = (size_t)(p - hay.ptr) - anchor;
-        if (memcmp(hay.ptr + at, needle.ptr, needle.len) == 0)
-            return at;
-        if (rejects == 0 && !switched) {
-            j = 0;
-            while (j < needle.len && hay.ptr[at + j] == needle.ptr[j])
-                j++;
-            if (j < needle.len && needle.ptr[j] != needle.ptr[anchor])
-                suggested = j;
+#ifdef CGREP_SSE2
+        /* Dense first-byte hits cost more per call than a vector scan. */
+        if (!f->vector && ++hits >= 8 && hits * 64 > at - base)
+            f->vector = 1;
+#else
+        (void)hits;
+#endif
+        if (hay.ptr[at + f->second] != needle.ptr[f->second]) {
+            /* memchr filter only: the first byte is hot here. */
+            if (suggested == NO_MATCH)
+                suggested = f->second;
+        } else {
+            if (memcmp(hay.ptr + at, needle.ptr, needle.len) == 0)
+                return at;
+            spent += needle.len;
+            if (suggested == NO_MATCH) {
+                j = 0;
+                while (j < needle.len && hay.ptr[at + j] == needle.ptr[j])
+                    j++;
+                if (j < needle.len && needle.ptr[j] != needle.ptr[f->first])
+                    suggested = j;
+            }
         }
+        spent += 8;
         at++;
-        if (++rejects == 8) {
-            if (switched || needle.ptr[anchor] == needle.ptr[suggested])
-                return find_linear(hay, at, literal);
-            anchor = suggested;
-            switched = 1;
-            rejects = 0;
+        if (spent <= at - base + slack)
+            continue;
+        if (!f->switched && suggested != NO_MATCH &&
+            needle.ptr[suggested] != needle.ptr[f->first]) {
+            f->second = f->first;
+            f->first = suggested;
+            f->switched = 1;
+        } else if (at <= last) {
+            window = hay.len - at;
+            if (window > 2 * needle.len + KMP_WINDOW)
+                window = 2 * needle.len + KMP_WINDOW;
+            state = 0;
+            end = find_end(cu_str_n(hay.ptr, at + window), at, literal, &state);
+            if (end != NO_MATCH)
+                return end - needle.len;
+            /* Every start before this one ends inside the scanned window. */
+            at = at + window - needle.len + 1;
         }
+        base = at;
+        spent = 0;
+        hits = 0;
+        suggested = NO_MATCH;
     }
     return NO_MATCH;
+}
+
+#ifdef CGREP_SSE2
+/* Byte lanes subtract compare masks (-1 per LF); flushing every 255
+ * blocks keeps each lane below 256. */
+static unsigned long count_lines(CuStr text, size_t from, size_t to)
+{
+    const char *p;
+    const char *end;
+    Bytes16 newline;
+    Bytes16 lanes;
+    unsigned char sums[16];
+    size_t blocks;
+    size_t i;
+    unsigned long n;
+
+    n = 0;
+    p = text.ptr + from;
+    end = text.ptr + to;
+    newline = splat16('\n');
+    while ((size_t)(end - p) >= 16) {
+        blocks = (size_t)(end - p) / 16;
+        if (blocks > 255)
+            blocks = 255;
+        lanes = newline ^ newline;
+        while (blocks-- != 0) {
+            lanes -= (Bytes16)(load16(p) == newline);
+            p += 16;
+        }
+        memcpy(sums, &lanes, sizeof sums);
+        for (i = 0; i < sizeof sums; i++)
+            n += sums[i];
+    }
+    while (p < end)
+        n += *p++ == '\n';
+    return n;
+}
+#else
+/* One flag byte per LF, with no cross-byte borrow propagation. */
+static unsigned long lf_flags(unsigned long word, unsigned long ones,
+                              unsigned long low, unsigned long high)
+{
+    word ^= ones * (unsigned long)'\n';
+    return (~(((word & low) + low) | word | low) & high) >> 7;
 }
 
 /* Count with bounded word batches only after repeated nearby newlines. */
@@ -232,7 +430,9 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
     unsigned long ones;
     unsigned long low;
     unsigned long high;
-    unsigned long mask;
+    unsigned long w1;
+    unsigned long w2;
+    unsigned long w3;
     unsigned long lanes;
     const char *word_end;
     size_t span;
@@ -258,8 +458,8 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
         p = found + 1;
         if (words && dense == 4) {
             span = (size_t)(end - p);
-            if (span > 256)
-                span = 256;
+            if (span > 1024)
+                span = 1024;
             batch = p + span;
             while ((size_t)(batch - p) >= sizeof word) {
                 span = (size_t)(batch - p) / sizeof word;
@@ -269,11 +469,18 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
                 /* At most 16 copied words: each byte lane sums to <=16,
                  * and the final byte sum is <=128, never wrapping at 256. */
                 lanes = 0;
+                while ((size_t)(word_end - p) >= 4 * sizeof word) {
+                    memcpy(&word, p, sizeof word);
+                    memcpy(&w1, p + sizeof word, sizeof w1);
+                    memcpy(&w2, p + 2 * sizeof word, sizeof w2);
+                    memcpy(&w3, p + 3 * sizeof word, sizeof w3);
+                    lanes += lf_flags(word, ones, low, high) + lf_flags(w1, ones, low, high) +
+                             lf_flags(w2, ones, low, high) + lf_flags(w3, ones, low, high);
+                    p += 4 * sizeof word;
+                }
                 while (p < word_end) {
                     memcpy(&word, p, sizeof word);
-                    word ^= ones * (unsigned long)'\n';
-                    mask = ~(((word & low) + low) | word | low) & high;
-                    lanes += mask >> 7;
+                    lanes += lf_flags(word, ones, low, high);
                     p += sizeof word;
                 }
                 n += (lanes * ones) >> ((sizeof word - 1) * CHAR_BIT);
@@ -287,6 +494,7 @@ static unsigned long count_lines(CuStr text, size_t from, size_t to)
     }
     return n;
 }
+#endif
 
 static CuStr number_prefix(char *end, unsigned long value)
 {
@@ -301,8 +509,29 @@ static CuStr number_prefix(char *end, unsigned long value)
     return cu_str_n(p, (size_t)(end - p));
 }
 
+/* glibc's unlocked stdio skips per-call stream locking. Only the thread
+ * that owns the CLI stream writes to it. */
+#if defined(__GLIBC__) && defined(_GNU_SOURCE) && !defined(__cerb__)
+#define CGREP_FWRITE fwrite_unlocked
+#else
+#define CGREP_FWRITE fwrite
+#endif
+
+/* Zero means an observed output error. */
+static int emit(const Search *s, const CuStr *parts, size_t count)
+{
+    size_t i;
+
+    if (s->write != NULL)
+        return s->write(s->context, parts, count);
+    for (i = 0; i < count; i++)
+        CGREP_FWRITE(parts[i].ptr, 1, parts[i].len, s->out);
+    return !ferror(s->out);
+}
+
 /* Search a complete-line window, or the final unterminated tail. *lines
- * counts LF bytes before this window. -1 means an observed output error. */
+ * counts LF bytes before this window. -1 means an observed output error.
+ * Without names or numbers, adjacent matching lines leave as one slice. */
 static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
 {
     size_t pos;
@@ -312,20 +541,35 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
     size_t counted;
     size_t name_len;
     size_t output_len;
+    size_t run_start;
+    size_t run_end;
     char number[sizeof(unsigned long) * CHAR_BIT + 2];
     CuStr prefix;
+    CuStr parts[5];
+    size_t part_count;
     unsigned long seen;
+    Finder local;
+    Finder *finder;
     int matched;
     int numbers;
+    int plain;
 
     matched = 0;
     pos = 0;
     counted = 0;
+    run_start = 0;
+    run_end = 0;
     seen = *lines;
     numbers = s->numbers;
+    plain = !s->names && !numbers;
     prefix = cu_str_n("", 0);
     name_len = s->names ? strlen(name) : 0;
-    while (pos < text.len && (m = find(text, pos, &s->literal)) != NO_MATCH) {
+    finder = s->finder;
+    if (finder == NULL) {
+        finder_init(&local, &s->literal);
+        finder = &local;
+    }
+    while (pos < text.len && (m = find_with(text, pos, &s->literal, finder)) != NO_MATCH) {
         /* pos is always a line's start, so the match's line starts there
          * or after it. */
         start = m;
@@ -341,32 +585,48 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
         output_len = end - start;
         if (end < text.len)
             output_len++;
-        if (numbers)
-            prefix = number_prefix(number + sizeof number, seen + 1);
-        if (s->write != NULL) {
-            if (s->names &&
-                (!s->write(s->context, name, name_len) || !s->write(s->context, ":", 1)))
-                return -1;
-            if (numbers && !s->write(s->context, prefix.ptr, prefix.len))
-                return -1;
-            if (!s->write(s->context, text.ptr + start, output_len) ||
-                (end == text.len && !s->write(s->context, "\n", 1)))
-                return -1;
-        } else {
-            if (s->names)
-                fprintf(s->out, "%s:", name);
-            if (numbers)
-                fwrite(prefix.ptr, 1, prefix.len, s->out);
-            fwrite(text.ptr + start, 1, output_len, s->out);
-            if (end == text.len)
-                fputc('\n', s->out);
-            if (ferror(s->out))
-                return -1;
-        }
         matched = 1;
+        part_count = 0;
+        if (plain) {
+            if (run_end != start) {
+                if (run_end != run_start) {
+                    parts[0] = cu_str_n(text.ptr + run_start, run_end - run_start);
+                    if (!emit(s, parts, 1))
+                        return -1;
+                }
+                run_start = start;
+            }
+            run_end = start + output_len;
+            if (end < text.len) {
+                pos = end + 1;
+                continue;
+            }
+            start = run_start;
+            output_len = run_end - run_start;
+            run_start = run_end;
+        } else {
+            if (s->names) {
+                parts[part_count++] = cu_str_n(name, name_len);
+                parts[part_count++] = cu_str_n(":", 1);
+            }
+            if (numbers) {
+                prefix = number_prefix(number + sizeof number, seen + 1);
+                parts[part_count++] = prefix;
+            }
+        }
+        parts[part_count++] = cu_str_n(text.ptr + start, output_len);
+        if (end == text.len)
+            parts[part_count++] = cu_str_n("\n", 1);
+        if (!emit(s, parts, part_count))
+            return -1;
         if (end == text.len)
             break;
         pos = end + 1;
+    }
+    if (run_end != run_start) {
+        parts[0] = cu_str_n(text.ptr + run_start, run_end - run_start);
+        if (!emit(s, parts, 1))
+            return -1;
     }
     if (numbers)
         *lines = seen + count_lines(text, counted, text.len);
@@ -401,13 +661,18 @@ static int binary_warning(const Search *s, const char *name, unsigned long offse
 {
     if (s->write != NULL) {
         char warning[sizeof(unsigned long) * CHAR_BIT + 64];
+        CuStr parts[3];
+        size_t count;
         int n;
 
-        if (s->names &&
-            (!s->write(s->context, name, strlen(name)) || !s->write(s->context, ": ", 2)))
-            return -1;
+        count = 0;
+        if (s->names) {
+            parts[count++] = cu_str_n(name, strlen(name));
+            parts[count++] = cu_str_n(": ", 2);
+        }
         n = sprintf(warning, "binary file matches (found \"\\0\" byte around offset %lu)\n", offset);
-        return s->write(s->context, warning, (size_t)n) ? 1 : -1;
+        parts[count++] = cu_str_n(warning, (size_t)n);
+        return s->write(s->context, parts, count) ? 1 : -1;
     }
     if (s->names)
         fprintf(s->out, "%s: ", name);
@@ -451,6 +716,8 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         cu_arena_release(arena);
         CU_VEC_INIT(buffer, arena, char);
     }
+    if (s->finder != NULL)
+        finder_init(s->finder, &s->literal);
     cu_vec_clear(buffer);
     if (!cu_vec_reserve(buffer, STREAM_CHUNK)) {
         result.error = SCAN_MEMORY;
@@ -634,6 +901,7 @@ static int worker_count(const char *text)
 int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 {
     Search s;
+    Finder finder;
     CuArena pattern_arena;
     CuArena input_arena;
     CuVec buffer;
@@ -649,6 +917,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     s.write = NULL;
     s.cancelled = NULL;
     s.context = NULL;
+    s.finder = &finder;
     jobs = 1;
     i = 1;
     while (i < argc && argv[i][0] == '-' && argv[i][1] != '\0') {

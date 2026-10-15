@@ -74,19 +74,30 @@ def main():
         build(ROOT, cutils, binary, "address,undefined")
         run(binary, "ASan/UBSan/LSan")
         print("PASS native worker failure/lifetime paths: ASan/UBSan/LSan", flush=True)
-        for name, old, new, rejection in [
-            ("file-reordering", "pool->workers[i].path = paths[i];",
-             "pool->workers[i].path = paths[jobs - i - 1];", "assert"),
-            ("lost-input-status", 'fprintf(err, "cgrep: %s: %s\\n", paths[i], scan_error(result));\n                    failed = 1;',
+        for filename, name, old, new, rejection in [
+            ("parallel.inc", "file-reordering", "worker->path = pool->paths[k];",
+             "worker->path = pool->paths[pool->count - k - 1];", "assert"),
+            ("parallel.inc", "lost-input-status", 'fprintf(err, "cgrep: %s: %s\\n", paths[i], scan_error(result));\n                    failed = 1;',
              'fprintf(err, "cgrep: %s: %s\\n", paths[i], scan_error(result));\n                    failed = 0;', "assert"),
-            ("missing-cancel", "    pool_cancel(pool, initialized);", "    if (0) pool_cancel(pool, initialized);", "hang"),
+            ("parallel.inc", "missing-cancel", "    pool_cancel(pool, initialized);", "    if (0) pool_cancel(pool, initialized);", "hang"),
+            ("cgrep.c", "wrong-body-fragment",
+             "parts[part_count++] = cu_str_n(text.ptr + start, output_len);",
+             "parts[part_count++] = cu_str_n(text.ptr + start, output_len - 1);", "assert"),
+            ("cgrep.c", "ignored-batch-failure",
+             "if (!emit(s, parts, part_count))",
+             "if (emit(s, parts, part_count) < 0)", "assert"),
+            ("parallel.inc", "short-channel-progress",
+             "worker->used = at;", "worker->used = at - 1;", "assert"),
+            ("parallel.inc", "missing-byte-progress",
+             "worker->bytes[at++] = parts[i].ptr[0];",
+             "worker->bytes[at] = parts[i].ptr[0];", "assert"),
         ]:
             project = work / name
             for folder in ["src", "include"]:
                 shutil.copytree(ROOT / folder, project / folder)
             (project / "tests").mkdir()
             shutil.copy2(ROOT / "tests/test_parallel.c", project / "tests/test_parallel.c")
-            path = project / "src/parallel.inc"
+            path = project / "src" / filename
             text = path.read_text()
             if text.count(old) != 1:
                 raise RuntimeError("stale worker mutation: " + name)

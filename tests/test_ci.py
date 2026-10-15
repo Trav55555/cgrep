@@ -22,6 +22,9 @@ def workflow_contract(text):
                 "persist-credentials: false"]
     if any(token not in text for token in required):
         raise ValueError("trusted push/runner/acceptance condition missing")
+    artifact_requirements = ["if: always()", "path: ci-artifacts/", "if-no-files-found: error", "retention-days: 30", "uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32"]
+    if any(token not in text for token in artifact_requirements) or not re.search(r"uses: actions/upload-artifact@[0-9a-f]{40}\n", text):
+        raise ValueError("missing mandatory pinned artifact retention")
     if "pull_request" in text or "deploy" in text or not re.search(r"uses: actions/checkout@[0-9a-f]{40}\n", text):
         raise ValueError("untrusted trigger, deployment, or unpinned action")
 
@@ -45,6 +48,12 @@ class CITests(unittest.TestCase):
                          ("cgrep-x86_64-3g", "ubuntu-latest")]:
             with self.assertRaises(ValueError):
                 workflow_contract(text.replace(old, new))
+
+    def test_artifact_step_is_sensitive(self):
+        text = (ROOT / ".gitea/workflows/ci.yml").read_text()
+        for token in ["if: always()", "if-no-files-found: error", "path: ci-artifacts/", "a8a3f3ad30e3422c9c7b888a15615d19a852ae32"]:
+            with self.assertRaises(ValueError):
+                workflow_contract(text.replace(token, "seeded missing retention"))
 
     def test_required_checks_are_sensitive(self):
         text = (ROOT / "ci/verify.sh").read_text()

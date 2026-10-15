@@ -11,9 +11,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { F_NONE, F_POOL, F_MUTEX, F_COND, F_ATTR, F_STACK, F_CREATE, F_OPEN,
+enum { F_NONE, F_POOL, F_WORKERS, F_MUTEX, F_COND, F_ATTR, F_STACK, F_CREATE, F_OPEN,
        F_STAT, F_FDOPEN, F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO };
 static int fault;
+static int allocations;
 static int creates;
 static int started_threads;
 static int joined;
@@ -25,7 +26,10 @@ static int race_ready;
 
 static void *test_alloc(size_t n)
 {
-    return fault == F_POOL ? NULL : malloc(n);
+    allocations++;
+    if (fault == F_POOL || (fault == F_WORKERS && allocations == 2))
+        return NULL;
+    return malloc(n);
 }
 
 static int test_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a)
@@ -154,6 +158,9 @@ static int test_close(FILE *file)
     return r;
 }
 
+/* Two input chunks per slot: the same slot logic as the 1 MiB production
+ * size, with fixtures small enough for valgrind's per-test time limit. */
+#define CHANNEL_BYTES 131072
 #define CGREP_POOL_ALLOC test_alloc
 #define CGREP_THREAD_CREATE test_create
 #define pthread_join test_join
@@ -232,6 +239,7 @@ static int invoke(char **paths, const char *jobs, FILE *out, FILE *err)
     args[7] = paths[3];
     args[8] = NULL;
     before = descriptors();
+    allocations = 0;
     creates = 0;
     started_threads = 0;
     joined = 0;
@@ -249,10 +257,54 @@ static void write_fixture(const char *path, int large)
 
     file = fopen(path, "wb");
     assert(file != NULL);
-    for (i = 0; i < (large ? 14000 : 2); i++)
+    if (large == 2) {
+        assert(fputs("alpha", file) >= 0);
+        for (i = 0; i < 2 * CHANNEL_BYTES; i++)
+            assert(fputc('x', file) != EOF);
+        assert(fputc('\n', file) != EOF);
+    }
+    /* Large fixtures emit more than two channel slots of numbered output. */
+    for (i = 0; i < (large == 1 ? 2 * CHANNEL_BYTES / 17 + 1000 : 2); i++)
         assert(fputs("alpha beta gamma\n", file) >= 0);
     assert(fputs("alpha tail", file) >= 0);
     assert(fclose(file) == 0);
+}
+
+static void channel_fit_cases(void)
+{
+    ParallelWorker *worker;
+    CuStr parts[5];
+    size_t capacity;
+    size_t room;
+
+    worker = (ParallelWorker *)malloc(sizeof *worker);
+    assert(worker != NULL);
+    worker->pool = NULL;
+    worker->fill = 0;
+    worker->slots[0].state = SLOT_FREE;
+    worker->bytes = worker->slots[0].bytes;
+    capacity = CHANNEL_BYTES;
+    parts[0] = cu_str_n(NULL, 0);
+    parts[1] = cu_str_n("ab", 2);
+    parts[2] = cu_str_n(":", 1);
+    parts[3] = cu_str_n("\303\251\n", 3);
+    parts[4] = cu_str_n(NULL, 0);
+    for (room = 6; room <= 7; room++) {
+        memset(worker->bytes, '#', capacity);
+        worker->used = capacity - room;
+        assert(channel_write(worker, parts, 5));
+        assert(worker->used == capacity - room + 6);
+        assert(memcmp(worker->bytes + capacity - room, "ab:\303\251\n", 6) == 0);
+        assert(worker->bytes[capacity - room - 1] == '#');
+        if (room == 7)
+            assert(worker->bytes[capacity - 1] == '#');
+        assert(worker->slots[0].state == SLOT_FREE && worker->fill == 0);
+    }
+    worker->used = capacity;
+    assert(channel_write(worker, NULL, 0));
+    assert(channel_write(worker, parts, 1));
+    assert(worker->used == capacity && worker->slots[0].state == SLOT_FREE);
+    free(worker);
 }
 
 static void native_cases(void)
@@ -284,6 +336,24 @@ static void native_cases(void)
         assert(out != NULL && err != NULL);
         assert(invoke(paths, i == 0 ? "-j2" : i == 1 ? "-j4" : "-j8", out, err) == 0);
         assert(creates == (i == 0 ? 2 : 4));
+        same_file(out, expected);
+        same_file(err, expected_err);
+        assert(fclose(out) == 0 && fclose(err) == 0);
+    }
+    /* One body fragment exceeds two channels; it must use ordered fallback. */
+    write_fixture(paths[0], 2);
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, "-j1", out, err) == 0);
+    assert(fclose(expected) == 0 && fclose(expected_err) == 0);
+    expected = out;
+    expected_err = err;
+    for (i = 0; i < 2; i++) {
+        out = tmpfile();
+        err = tmpfile();
+        assert(out != NULL && err != NULL);
+        assert(invoke(paths, i == 0 ? "-j2" : "-j8", out, err) == 0);
         same_file(out, expected);
         same_file(err, expected_err);
         assert(fclose(out) == 0 && fclose(err) == 0);
@@ -355,20 +425,26 @@ typedef struct {
     char bytes[192];
     size_t used;
     int calls;
+    int batches;
     int fail;
 } CallbackOutput;
 
-static int callback_write(void *context, const char *bytes, size_t n)
+static int callback_write(void *context, const CuStr *parts, size_t count)
 {
     CallbackOutput *out;
+    size_t i;
 
     out = (CallbackOutput *)context;
-    out->calls++;
-    if (out->calls == out->fail)
-        return 0;
-    assert(n <= sizeof out->bytes - out->used);
-    memcpy(out->bytes + out->used, bytes, n);
-    out->used += n;
+    out->batches++;
+    assert(count <= 5);
+    for (i = 0; i < count; i++) {
+        out->calls++;
+        if (out->calls == out->fail)
+            return 0;
+        assert(parts[i].len <= sizeof out->bytes - out->used);
+        memcpy(out->bytes + out->used, parts[i].ptr, parts[i].len);
+        out->used += parts[i].len;
+    }
     return 1;
 }
 
@@ -388,10 +464,12 @@ static void callback_cases(void)
     search.out = NULL;
     search.write = callback_write;
     search.cancelled = NULL;
+    search.finder = NULL;
     search.context = &output;
     for (i = 0; i <= 5; i++) {
         output.used = 0;
         output.calls = 0;
+        output.batches = 0;
         output.fail = i;
         lines = 0;
         assert(search_text(&search, "f", cu_str_cstr("xx\nalpha tail"), &lines) == (i == 0 ? 1 : -1));
@@ -400,21 +478,33 @@ static void callback_cases(void)
             assert(output.used == strlen(expected));
             assert(memcmp(output.bytes, expected, output.used) == 0);
         } else {
+            static const char *const partial[] = {"", "f", "f:", "f:2:", "f:2:alpha tail"};
+
             assert(output.calls == i);
+            assert(output.used == strlen(partial[i - 1]));
+            assert(memcmp(output.bytes, partial[i - 1], output.used) == 0);
         }
+        assert(output.batches == 1);
     }
     for (i = 0; i <= 3; i++) {
         output.used = 0;
         output.calls = 0;
+        output.batches = 0;
         output.fail = i;
         assert(binary_warning(&search, "f", 7) == (i == 0 ? 1 : -1));
-        if (i != 0)
+        if (i != 0) {
+            expected = i == 1 ? "" : i == 2 ? "f" : "f: ";
             assert(output.calls == i);
+            assert(output.used == strlen(expected));
+            assert(memcmp(output.bytes, expected, output.used) == 0);
+        }
+        assert(output.batches == 1);
     }
     search.names = 0;
     search.numbers = 0;
     output.used = 0;
     output.calls = 0;
+    output.batches = 0;
     output.fail = 0;
     lines = 0;
     assert(search_text(&search, "f", cu_str_cstr("alpha"), &lines) == 1);
@@ -471,6 +561,7 @@ int main(int argc, char **argv)
     portable_options();
     callback_cases();
 #ifdef CGREP_NATIVE_PARALLEL
+    channel_fit_cases();
     native_cases();
     puts("test_parallel: native PASS");
 #else

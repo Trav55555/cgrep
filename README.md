@@ -21,11 +21,15 @@ with SIGPIPE instead.
 
 Default execution is serial. `-j N` or `-jN`, for 1 through 8 workers,
 opts into bounded regular-file parallelism on Linux/glibc 2.34 or newer.
-Output and diagnostics retain argument order. Stdin/nonregular paths and
-unsupported targets stay serial. Each worker has its own input window and
-a fixed 64 KiB output channel; the pool joins all started workers before
-returning. Regular-file reads can delay cancellation. Small matching files
-and heavy output can be slower with workers; see [performance](docs/PERFORMANCE.md).
+Output and diagnostics retain argument order. Stdin stays serial, and a
+path that turns out not to be a regular file is searched serially when its
+turn comes. Unsupported targets stay serial. Worker `w` searches paths
+`w`, `w + N`, and so on, each with its own input window and two 1 MiB output
+slots, so it can search its next file while the coordinator writes the
+previous one. Slots are allocated only for workers actually started. The pool
+joins all started workers before returning. Regular-file reads can delay
+cancellation, which workers check every eighth refill. Small matching files
+can still be slower with workers; see [performance](docs/PERFORMANCE.md).
 
 Patterns are literal. Compare streaming behavior with
 `rg -F --no-config --no-mmap -j1` using piped output. Newline patterns are
@@ -33,24 +37,33 @@ rejected. Text output preserves CRLF and adds a newline to matching final
 unterminated lines. BOM stripping and encoding conversion are not supported.
 
 cgrep reuses a 64 KiB input window across files, growing it only for an
-unfinished line. It prepares the literal once per command. `memchr`
-filters candidates using the byte least repeated within the pattern, and
-`memcmp` confirms them. That
-choice is only a heuristic. Search inspects the first failed comparison
-once and uses its mismatched expected byte to suggest a different filter.
-If that byte is unchanged, it keeps the pattern-derived alternate. After
-at most one switch and a bounded number of false candidates, search falls
-back to Knuth-Morris-Pratt, or KMP. Uniform literals use a separate linear
-path: a mismatching terminal byte skips a full window, and a failed comparison
+unfinished line. It prepares the literal once per command, choosing two
+filter bytes with a static background byte-frequency rank (from the memchr
+crate), not from the pattern's own bytes. A candidate must match both bytes
+before `memcmp` confirms it. Search starts with libc `memchr` on the rarer
+byte; on x86-64, once those hits prove dense, it switches to an SSE2 scan of
+both bytes at once. Confirmation work is charged against the bytes skipped.
+When it outruns them, search switches once per input to a byte that
+actually mismatched, and after that runs Knuth-Morris-Pratt, or KMP, over
+one bounded window before resuming the filter. Learned choices persist
+across matches within an input. Uniform literals use a separate linear path:
+a mismatching terminal byte skips a full window, and a failed comparison
 skips through its rightmost blocking byte. Its prefix table takes O(pattern
 length) memory. Search work is O(input length + pattern length), including
-preparation. Line counting runs only when `-n` requests it. After four nearby
-newlines, it counts at most 256 bytes using exact word-lane masks, then returns
-to `memchr`. Byte loads use `memcpy`; word counting is enabled only for checked
-32/64-bit unsigned-long representations with 8-bit bytes. Up to 16 words share
-one lane reduction, with no byte-lane carry. Other representations retain
-character-only counting. The Linux CLI uses a 64 KiB stdout buffer for
-non-TTY output only; caller-owned library streams keep their existing setup.
+preparation.
+
+Line counting runs only when `-n` requests it, lazily up to each printed
+line. On x86-64 it counts 16 bytes per step with SSE2 compare masks. Other
+targets use `memchr`, and after four nearby newlines count at most 1024
+bytes using exact word-lane masks. Byte loads use `memcpy`; word counting is
+enabled only for checked 32/64-bit unsigned-long representations with 8-bit
+bytes. Four independent loads share a loop step, with up to 16 words per lane
+reduction and no byte-lane carry. Other representations retain
+character-only counting. Without names or numbers, adjacent matching lines
+are written as one slice. The Linux CLI uses a 64 KiB stdout buffer for
+non-TTY output only and glibc's unlocked stdio; caller-owned library streams
+keep their existing setup. Build with `-DCGREP_NO_SIMD` to force the
+portable code.
 
 ## Streaming limits and binary input
 
@@ -100,7 +113,7 @@ python3 -I tests/benchmark_parallel.py build/cgrep --mib 64 --repeats 7 --number
 ```
 
 `make verify` runs c-utils' own tests and gate, checks the CLI entry point,
-replays the framing oracle and its four output mutants, runs cgrep's deep
+replays the framing oracle and its six output mutants, runs cgrep's deep
 checks, and checks the actual executable with I/O budgets and 3000 differential
 cases each for seeds 7 and 42. It rejects missing required checks or unexpected
 skips. Authority, regions, absent CBMC proofs, and optional tcc remain outside
@@ -124,15 +137,11 @@ and resource behavior, not benchmark parity.
 runner and complete source pins. Check the latest Gitea job and acceptance
 receipts before treating a published revision as CI-verified.
 
-The broader [performance baseline and target](docs/PERFORMANCE.md) includes
-GNU grep and ripgrep at `-j1`, `-j2`, `-j4`, `-j8`, and default threads. It
-checks exact output before/after randomized timing, allows only ripgrep's
-file-order differences, and requires complete output to a real sink during
-measurement. It includes explicit-file workloads, numbering, and matching
-output. The target is to meet the strongest valid competitor without reducing
-correctness or memory guarantees; the current implementation does not yet
-meet that target overall. The first serial optimization now beats GNU grep on
-the measured uniform-pattern stress case; parallel and output gaps remain.
+[Performance status](docs/PERFORMANCE.md) separates correctness acceptance
+from quiet performance qualification. The strongest-competitor target remains
+unmet. For executable identities, report limits and raw artifact locations,
+see the [evidence index](docs/EVIDENCE.md). Historical measurements do not
+qualify later source changes.
 
 The literal benchmark compares cgrep, ripgrep, and `grep -F` with
 `LC_ALL=C` for all tools, checking output and status before timing. Its JSON

@@ -135,6 +135,20 @@ static void test_several_files_and_numbers(void)
     assert(strcmp(out_bare(), "a:1:alpha one\na:3:alpha alpha two\nb:2:last alpha\n") == 0);
 }
 
+static void test_literal_path_prefixes(void)
+{
+    static const char *const plain[] = {"alpha", "@%s: space\303\251", "@tail"};
+    static const char *const numbered[] = {"-n", "alpha", "@%s: space\303\251", "@tail"};
+
+    write_file("%s: space\303\251", "alpha\nno\nalpha last", 19);
+    write_file("tail", "alpha\n", 6);
+    assert(run(NULL, 3, plain) == 0);
+    assert(strcmp(out_bare(), "%s: space\303\251:alpha\n%s: space\303\251:alpha last\ntail:alpha\n") == 0);
+    assert(run(NULL, 4, numbered) == 0);
+    assert(strcmp(out_bare(), "%s: space\303\251:1:alpha\n%s: space\303\251:3:alpha last\ntail:1:alpha\n") == 0);
+    assert(err_text[0] == '\0');
+}
+
 static void test_no_match(void)
 {
     static const char *const args[] = {"zzz", "@t2"};
@@ -334,6 +348,7 @@ int main(void)
     strcpy(dir, tmp);
     test_one_file();
     test_several_files_and_numbers();
+    test_literal_path_prefixes();
     test_no_match();
     test_missing_path();
     test_binary();

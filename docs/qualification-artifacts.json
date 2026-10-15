@@ -1,0 +1,375 @@
+{
+  "schema": "cgrep.qualification-artifacts/0",
+  "base_revision": "a5ab2e769369ce955cbc90fb74e31e895daf6b27",
+  "status": "local artifact checks verified; quiet performance and live persistence blocked",
+  "source_unchanged": {
+    "cmd/main.c": "621bf6071e7f41b1c1df699767d9476a97700b9c8e5d0f85054276475fb6d880",
+    "include/cgrep.h": "f8797799316d65b346bba023c5ed3c7f5cc8bfb65e6cc67db4caff59ed7b5177",
+    "semantics/sem_cli.c": "ba6c2dd199bb194e04afcfbc5acd70468b98d584953213695c3411567582d78d",
+    "semantics/sem_find.c": "398dd0a8e2f4afc92d12db253053b8418f9c8e959c8596ab0b367c3d02ebb772",
+    "semantics/sem_parallel.c": "4d3b699aed63af5db1ce5edf8125f56733b5c2f831b6263a7099aa161eb9204b",
+    "semantics/sem_stream.c": "4f0f29bbf6c39b0c891b5e4d034032d9295a53562074f63fa3730b0904ffee26",
+    "src/cgrep.c": "c93d1242ab8cde299ecdd9071840e33b50908704bb6a575cb3635d266e437d4a",
+    "src/parallel.inc": "8fbb0f4c6cebc788c750b33c9e8b709d3952e983027c04fc498842789612193a",
+    "tests/fixtures/framing_driver.c": "148a802762e70021c03fc958198c7e39b153230d43e31e6ad310348c9f19b364",
+    "tests/test_cgrep.c": "cd4b7d54a929ba992452975db38b8cc355e1dc64f81e94e1164782d7c42effb9",
+    "tests/test_cli_buffer.c": "8e67874fcf5e4d1ca9b577ae53a90634cc1ba0c5615df80ecdf6b334bdc80802",
+    "tests/test_count.c": "20efd200a65d502ca40da550be4e7fa9811f144e519f36606b0f72e04d22fe21",
+    "tests/test_find.c": "0033eeea9af1e1fd3c73ec4765682d9fcb5b331fd6e62caa7e8214df3a4a35dc",
+    "tests/test_parallel.c": "0cec1727d4d6ace2663215988cfe6740f7e8dd3be0660f4c873b3b91dca22da2",
+    "tests/test_stream.c": "dd6c1c705a41a6b590877fc46dc20a43900c745d94961547e25bc048b54cc2d1"
+  },
+  "candidate_sha256": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+  "quiet": {
+    "schema": "cgrep.quiet-benchmark/0",
+    "started_utc": "2026-10-14T05:19:05.366136+00:00",
+    "command": [
+      "bash",
+      "-c",
+      "set -e; python3 -I /tmp/cgrep-qualification.qMveIS9Y/bench_slices.py plain > /tmp/cgrep-qualification.qMveIS9Y/slices-plain.log; python3 -I /tmp/cgrep-qualification.qMveIS9Y/bench_slices.py numbered > /tmp/cgrep-qualification.qMveIS9Y/slices-numbered.log"
+    ],
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-p2660138-i31998973.scope",
+    "max_background_percent": 10,
+    "max_load_per_cpu": 0.5,
+    "load_gate": "admission only; during-run load includes benchmark workers",
+    "quiet_seconds_required": 5,
+    "limits": "CPU/load admission and during-run monitoring, not isolation or frequency/thermal control",
+    "admission": [
+      {
+        "background_percent": 35.95380831212893,
+        "scope_cpu_seconds": 0.001046,
+        "iowait_percent": 27.650551314673454,
+        "load_per_cpu": 0.21671549479166666
+      },
+      {
+        "background_percent": 24.8058933107536,
+        "scope_cpu_seconds": 0.000424,
+        "iowait_percent": 26.333615580016932,
+        "load_per_cpu": 0.21671549479166666
+      },
+      {
+        "background_percent": 30.83711979609176,
+        "scope_cpu_seconds": 0.000471,
+        "iowait_percent": 20.390824129141887,
+        "load_per_cpu": 0.21671549479166666
+      },
+      {
+        "background_percent": 11.782483164983164,
+        "scope_cpu_seconds": 0.000241,
+        "iowait_percent": 25.925925925925924,
+        "load_per_cpu": 0.20601399739583334
+      },
+      {
+        "background_percent": 15.085490360435877,
+        "scope_cpu_seconds": 0.000301,
+        "iowait_percent": 26.320201173512157,
+        "load_per_cpu": 0.20601399739583334
+      },
+      {
+        "background_percent": 17.77917866215072,
+        "scope_cpu_seconds": 0.000279,
+        "iowait_percent": 23.624047417442846,
+        "load_per_cpu": 0.20601399739583334
+      },
+      {
+        "background_percent": 16.326826599326598,
+        "scope_cpu_seconds": 0.000373,
+        "iowait_percent": 31.397306397306394,
+        "load_per_cpu": 0.20601399739583334
+      },
+      {
+        "background_percent": 15.224754653130288,
+        "scope_cpu_seconds": 0.000434,
+        "iowait_percent": 30.456852791878173,
+        "load_per_cpu": 0.20601399739583334
+      },
+      {
+        "background_percent": 12.677464074387151,
+        "scope_cpu_seconds": 0.000256,
+        "iowait_percent": 30.85376162299239,
+        "load_per_cpu": 0.20284016927083334
+      },
+      {
+        "background_percent": 16.068809523809524,
+        "scope_cpu_seconds": 0.000308,
+        "iowait_percent": 25.68027210884354,
+        "load_per_cpu": 0.20284016927083334
+      },
+      {
+        "background_percent": 31.140853242320816,
+        "scope_cpu_seconds": 0.000292,
+        "iowait_percent": 22.35494880546075,
+        "load_per_cpu": 0.20284016927083334
+      },
+      {
+        "background_percent": 13.290821337849282,
+        "scope_cpu_seconds": 0.000354,
+        "iowait_percent": 27.349703640982217,
+        "load_per_cpu": 0.20284016927083334
+      },
+      {
+        "background_percent": 14.090126582278481,
+        "scope_cpu_seconds": 0.00032,
+        "iowait_percent": 27.51054852320675,
+        "load_per_cpu": 0.20284016927083334
+      },
+      {
+        "background_percent": 16.663703703703703,
+        "scope_cpu_seconds": 0.000352,
+        "iowait_percent": 26.515151515151512,
+        "load_per_cpu": 0.1932373046875
+      },
+      {
+        "background_percent": 19.91298734177215,
+        "scope_cpu_seconds": 0.000311,
+        "iowait_percent": 28.438818565400844,
+        "load_per_cpu": 0.1932373046875
+      },
+      {
+        "background_percent": 15.114788851351353,
+        "scope_cpu_seconds": 0.000409,
+        "iowait_percent": 29.64527027027027,
+        "load_per_cpu": 0.1932373046875
+      },
+      {
+        "background_percent": 21.534222972972973,
+        "scope_cpu_seconds": 0.000348,
+        "iowait_percent": 24.408783783783782,
+        "load_per_cpu": 0.1932373046875
+      },
+      {
+        "background_percent": 12.697022708158116,
+        "scope_cpu_seconds": 0.000324,
+        "iowait_percent": 25.315391084945333,
+        "load_per_cpu": 0.1932373046875
+      },
+      {
+        "background_percent": 8.330311447811447,
+        "scope_cpu_seconds": 0.000359,
+        "iowait_percent": 28.030303030303028,
+        "load_per_cpu": 0.177734375
+      },
+      {
+        "background_percent": 12.074721283783783,
+        "scope_cpu_seconds": 0.000353,
+        "iowait_percent": 29.72972972972973,
+        "load_per_cpu": 0.177734375
+      },
+      {
+        "background_percent": 11.932131287297526,
+        "scope_cpu_seconds": 0.000361,
+        "iowait_percent": 27.96248934356351,
+        "load_per_cpu": 0.177734375
+      },
+      {
+        "background_percent": 7.840784313725489,
+        "scope_cpu_seconds": 0.000276,
+        "iowait_percent": 30.179028132992325,
+        "load_per_cpu": 0.177734375
+      },
+      {
+        "background_percent": 13.421189464740866,
+        "scope_cpu_seconds": 0.000326,
+        "iowait_percent": 30.076465590484283,
+        "load_per_cpu": 0.177734375
+      },
+      {
+        "background_percent": 7.696142131979696,
+        "scope_cpu_seconds": 0.000316,
+        "iowait_percent": 29.357021996615906,
+        "load_per_cpu": 0.16349283854166666
+      },
+      {
+        "background_percent": 17.993463497453313,
+        "scope_cpu_seconds": 0.00037,
+        "iowait_percent": 25.04244482173175,
+        "load_per_cpu": 0.16349283854166666
+      },
+      {
+        "background_percent": 17.21537743850721,
+        "scope_cpu_seconds": 0.000307,
+        "iowait_percent": 26.208651399491096,
+        "load_per_cpu": 0.16349283854166666
+      },
+      {
+        "background_percent": 18.442946199829205,
+        "scope_cpu_seconds": 0.000331,
+        "iowait_percent": 29.20580700256191,
+        "load_per_cpu": 0.16349283854166666
+      },
+      {
+        "background_percent": 24.848464800678542,
+        "scope_cpu_seconds": 0.000366,
+        "iowait_percent": 23.070398642917727,
+        "load_per_cpu": 0.16349283854166666
+      },
+      {
+        "background_percent": 22.793474576271183,
+        "scope_cpu_seconds": 0.00037,
+        "iowait_percent": 21.1864406779661,
+        "load_per_cpu": 0.16377766927083334
+      },
+      {
+        "background_percent": 23.12637755102041,
+        "scope_cpu_seconds": 0.000338,
+        "iowait_percent": 25.935374149659864,
+        "load_per_cpu": 0.16377766927083334
+      }
+    ],
+    "during": [],
+    "admitted": false,
+    "quiet_eligible": false,
+    "returncode": null
+  },
+  "timing_started": false,
+  "artifact_pilot": {
+    "schema": "cgrep.artifact-local-pilot/0",
+    "fresh_ci_job": false,
+    "live_upload_verified": false,
+    "limits": [
+      "composite logs, not a fresh wrapper selftest/acceptance run",
+      "local ZIP retrieval, not Gitea upload/download",
+      "manifest hashes check contents, not uploader authenticity"
+    ],
+    "source_logs": {
+      "/tmp/cgrep-count-format.wMMo2q/acceptance.log": "a88cca21368d95eb1a05a22294f48efc3e1faff5bd0f278c3403ee13cf44aac4",
+      "/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/toolchain-selftest.log": "5086f8d0b2a77be7d9e6bfc387f5b1596ffab70636175925511eaeaba13f9473"
+    },
+    "receipt_sources": {
+      "c-utils.json": "6333b6293d918c167cf66b0c150d494a4072757392ca8f45cd11a80510c30b57",
+      "cli.json": "c8b5bf8a22fc4dfbdf26c67bc69fad6fd2cf5e66a1254c60e3a182e33327f95e",
+      "cgrep.json": "ce3e0cc2301f48253406aa752e6c4724d1b8afe17d094cc27920559393b37be7"
+    },
+    "cases": [
+      {
+        "label": "success",
+        "exit": 0,
+        "manifest": {
+          "schema": "cgrep.ci-artifacts/0",
+          "recorded_utc": "2026-10-14T05:24:21.106971+00:00",
+          "revision": null,
+          "acceptance_exit_code": 0,
+          "complete_success": true,
+          "files": [
+            {
+              "path": "toolchain-selftest.log",
+              "bytes": 7880,
+              "sha256": "5086f8d0b2a77be7d9e6bfc387f5b1596ffab70636175925511eaeaba13f9473"
+            },
+            {
+              "path": "acceptance.log",
+              "bytes": 9376,
+              "sha256": "363fe54d38ff85dafbaf72100d1f76c58566f72e7695f26d5580a72bf2b7a168"
+            },
+            {
+              "path": "c-utils.json",
+              "bytes": 615,
+              "sha256": "6333b6293d918c167cf66b0c150d494a4072757392ca8f45cd11a80510c30b57"
+            },
+            {
+              "path": "cli.json",
+              "bytes": 176,
+              "sha256": "c8b5bf8a22fc4dfbdf26c67bc69fad6fd2cf5e66a1254c60e3a182e33327f95e"
+            },
+            {
+              "path": "cgrep.json",
+              "bytes": 881,
+              "sha256": "ce3e0cc2301f48253406aa752e6c4724d1b8afe17d094cc27920559393b37be7"
+            }
+          ]
+        },
+        "disposable_job_removed": true,
+        "archive_sha256": "e2e5eebda23a4c6a904d54ffd1c16a51ee316b8899361a5872449f8582f6e99c",
+        "retrieval_log": "PASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.78% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS subset\nPASS lint\nPASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.44% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS semantics dedicated harnesses: semantics (4 files); full tests retained in native checks\nPASS valgrind\nPASS fuzz\nSKIP cbmc no proofs in proofs/\nBundle integrity: PASS; recorded acceptance exit 0\n"
+      },
+      {
+        "label": "seeded-exit-failure",
+        "exit": 7,
+        "manifest": {
+          "schema": "cgrep.ci-artifacts/0",
+          "recorded_utc": "2026-10-14T05:24:21.256961+00:00",
+          "revision": null,
+          "acceptance_exit_code": 7,
+          "complete_success": false,
+          "files": [
+            {
+              "path": "toolchain-selftest.log",
+              "bytes": 7880,
+              "sha256": "5086f8d0b2a77be7d9e6bfc387f5b1596ffab70636175925511eaeaba13f9473"
+            },
+            {
+              "path": "acceptance.log",
+              "bytes": 9376,
+              "sha256": "666d912eefd4e88d0ffd9987ec1014b14fc56aea963e08b13a0d742b953cc1a1"
+            },
+            {
+              "path": "c-utils.json",
+              "bytes": 615,
+              "sha256": "6333b6293d918c167cf66b0c150d494a4072757392ca8f45cd11a80510c30b57"
+            },
+            {
+              "path": "cli.json",
+              "bytes": 176,
+              "sha256": "c8b5bf8a22fc4dfbdf26c67bc69fad6fd2cf5e66a1254c60e3a182e33327f95e"
+            },
+            {
+              "path": "cgrep.json",
+              "bytes": 881,
+              "sha256": "ce3e0cc2301f48253406aa752e6c4724d1b8afe17d094cc27920559393b37be7"
+            }
+          ]
+        },
+        "disposable_job_removed": true,
+        "archive_sha256": "080c56b55f5372378375c57f007dfc5a563306dbf3e57547060b1d65c7c09c7d",
+        "retrieval_log": "Bundle integrity: PASS; recorded acceptance exit 7\n"
+      }
+    ]
+  },
+  "retrieved_success_bundle": {
+    "acceptance.log": "CUTILS=\"/tmp/cgrep-count-format.wMMo2q/acceptance/c-utils\" DCHECK=\"/home/travers/projects/dependable-c-agent-toolchain/bin/dcheck\" BUILD=\"build\" bash tests/verify.sh\nVerified checker profile: /home/travers/.local/opt/dcheck-tools/656f4076c75c5f19488a\nAcceptance receipts: /tmp/cgrep-qualification.qMveIS9Y/disposable-job-yf3eopsa/cgrep/build/verify.y000FW\nmake[1]: Entering directory '/tmp/cgrep-count-format.wMMo2q/acceptance/c-utils'\nmkdir -p build\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_arena tests/test_arena.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_bytes tests/test_bytes.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_file tests/test_file.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_file_seek tests/test_file_seek.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_fmt tests/test_fmt.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_input tests/test_input.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_map tests/test_map.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_plex tests/test_plex.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_pool tests/test_pool.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_scopes tests/test_scopes.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_size tests/test_size.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_slice tests/test_slice.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_str tests/test_str.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -Iinclude -o build/test_vec tests/test_vec.c src/cu_arena.c src/cu_bytes.c src/cu_file.c src/cu_fmt.c src/cu_input.c src/cu_map.c src/cu_plex.c src/cu_pool.c src/cu_str.c src/cu_vec.c\nbuild/test_arena\nbuild/test_bytes\nbuild/test_file\nbuild/test_file_seek\nbuild/test_fmt\nbuild/test_input\nbuild/test_map\nbuild/test_plex\nbuild/test_pool\nbuild/test_scopes\nbuild/test_size\nbuild/test_slice\nbuild/test_str\nbuild/test_vec\nmake[1]: Leaving directory '/tmp/cgrep-count-format.wMMo2q/acceptance/c-utils'\nPASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.78% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS subset\nPASS lint\nfuzz_find: 4 seeds, largest 17 bytes\nfuzz_stream: 14 seeds, largest 196622 bytes\n......\n----------------------------------------------------------------------\nRan 6 tests in 0.001s\n\nOK\nPASS framing replay: 14 fixtures + known outputs, native\nPASS framing replay: 14 fixtures + known outputs, ASan/UBSan/LSan\nPASS compiled output mutant rejected: missing-newline\nPASS compiled output mutant rejected: missing-inline-newline\nPASS compiled output mutant rejected: short-filename\nPASS compiled output mutant rejected: missing-filename-colon\nPASS compiled output mutant rejected: wrong-number\nPASS compiled output mutant rejected: wrong-nul-offset\nPASS compiled mutant rejected natively and by Cerberus: uniform-overstep\nIn file included from /tmp/cgrep-serial-sensitivity-mf0gdz3y/borrow-mask/tests/test_count.c:12:\n/tmp/cgrep-serial-sensitivity-mf0gdz3y/borrow-mask/tests/../src/cgrep.c:225:45: warning: unused parameter 'low' [-Wunused-parameter]\n  225 |                               unsigned long low, unsigned long high)\n      |                                             ^\n1 warning generated.\n/tmp/cgrep-serial-sensitivity-mf0gdz3y/borrow-mask/src/cgrep.c:225:45: warning: unused parameter 'low' [-Wunused-parameter]\n  225 |                               unsigned long low, unsigned long high)\n      |                                             ^\n1 warning generated.\nPASS compiled mutant rejected natively and by Cerberus: borrow-mask\nPASS compiled mutant rejected natively and by Cerberus: lane-sum\nPASS compiled mutant rejected natively and by Cerberus: lane-batch-overflow\nPASS compiled mutant rejected natively and by Cerberus: duplicated-fourth-word\n...........\n----------------------------------------------------------------------\nRan 11 tests in 0.001s\n\nOK\n......\n----------------------------------------------------------------------\nRan 6 tests in 0.039s\n\nOK\n....Quiet benchmark: eligible /tmp/tmpeib9bihx/report.json\n..\n----------------------------------------------------------------------\nRan 6 tests in 0.001s\n\nOK\n.......\n----------------------------------------------------------------------\nRan 7 tests in 0.039s\n\nOK\nCI artifact bundle: /tmp/tmp2peet08z/upload exit 0 files 5\n...CI artifact bundle: /tmp/tmp95w_p6ez/upload exit 7 files 1\n..\n----------------------------------------------------------------------\nRan 5 tests in 0.066s\n\nOK\nPASS native worker failure/lifetime paths: ThreadSanitizer\nPASS race detector rejects compiled unsynchronized-write control: 3/3\nPASS native worker failure/lifetime paths: ASan/UBSan/LSan\nPASS compiled worker mutant rejected: file-reordering\nPASS compiled worker mutant rejected: lost-input-status\nPASS compiled worker mutant rejected: missing-cancel\nPASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.44% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS semantics dedicated harnesses: semantics (4 files); full tests retained in native checks\nPASS valgrind\nPASS fuzz\nSKIP cbmc no proofs in proofs/\nmake[1]: Entering directory '/tmp/cgrep-count-format.wMMo2q/acceptance/cgrep'\nmkdir -p build\ncc -std=c89 -pedantic-errors -Wall -Wextra -Werror -g -O2 -D_GNU_SOURCE -Iinclude -I/tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/include -o build/cgrep cmd/main.c src/cgrep.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_arena.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_bytes.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_file.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_fmt.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_input.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_map.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_plex.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_pool.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_str.c /tmp/cgrep-count-format.wMMo2q/acceptance/c-utils/src/cu_vec.c\nmake[1]: Leaving directory '/tmp/cgrep-count-format.wMMo2q/acceptance/cgrep'\nPASS streaming file: 64 MiB input under a 32 MiB address-space limit\nPASS eight workers: 448 MiB scanned under a 32 MiB address-space limit\nPASS streaming pipe: 64 MiB input under a 32 MiB address-space limit\nPASS line limit: status 2, later input still searched\nPASS allocation refusal: failed buffer discarded, later input still searched\nPASS worker line/allocator limits: status 2 with ordered later match\nPASS output device failure: status 2\nPASS worker output device failure: status 2 and joined scope\nPASS output failure: later blocking input was never opened\nPASS requested workers: non-regular fallback stops before blocked FIFO\ndifftest: 3000/3000 cases identical, cgrep -j1 ordered\ndifftest: 3000/3000 cases identical, cgrep -j1 ordered\ndifftest: 3000/3000 cases identical, cgrep -j8 ordered\ndifftest: 3000/3000 cases identical, cgrep -j8 ordered\nacceptance: PASS (optional authority/regions/CBMC checks may be skipped; semantics is bounded)\n",
+    "c-utils.json": "{\"schema\":\"dcheck.result/0\",\"tier\":\"gate\",\"status\":\"pass\",\"strict\":false,\"failed\":[],\"skipped\":[\"authority\",\"regions\"],\"checks\":[{\"name\":\"subset\",\"status\":\"pass\"},{\"name\":\"lint\",\"status\":\"pass\"},{\"name\":\"matrix\",\"status\":\"pass\"},{\"name\":\"analyzer\",\"status\":\"pass\"},{\"name\":\"sanitize\",\"status\":\"pass\"},{\"name\":\"msan\",\"status\":\"pass\"},{\"name\":\"release\",\"status\":\"pass\"},{\"name\":\"wasm\",\"status\":\"pass\"},{\"name\":\"coverage\",\"status\":\"pass\",\"detail\":\"91.78% lines, min 90%\"},{\"name\":\"authority\",\"status\":\"skip\",\"detail\":\"no ward.toml\"},{\"name\":\"regions\",\"status\":\"skip\",\"detail\":\"REGIONS_CHECK not set in dcheck.conf\"}]}\n",
+    "cgrep.json": "{\"schema\":\"dcheck.result/0\",\"tier\":\"deep\",\"status\":\"pass\",\"strict\":false,\"failed\":[],\"skipped\":[\"authority\",\"regions\",\"cbmc\"],\"checks\":[{\"name\":\"subset\",\"status\":\"pass\"},{\"name\":\"lint\",\"status\":\"pass\"},{\"name\":\"matrix\",\"status\":\"pass\"},{\"name\":\"analyzer\",\"status\":\"pass\"},{\"name\":\"sanitize\",\"status\":\"pass\"},{\"name\":\"msan\",\"status\":\"pass\"},{\"name\":\"release\",\"status\":\"pass\"},{\"name\":\"wasm\",\"status\":\"pass\"},{\"name\":\"coverage\",\"status\":\"pass\",\"detail\":\"91.44% lines, min 90%\"},{\"name\":\"authority\",\"status\":\"skip\",\"detail\":\"no ward.toml\"},{\"name\":\"regions\",\"status\":\"skip\",\"detail\":\"REGIONS_CHECK not set in dcheck.conf\"},{\"name\":\"semantics\",\"status\":\"pass\",\"detail\":\"dedicated harnesses: semantics (4 files); full tests retained in native checks\"},{\"name\":\"valgrind\",\"status\":\"pass\"},{\"name\":\"fuzz\",\"status\":\"pass\"},{\"name\":\"cbmc\",\"status\":\"skip\",\"detail\":\"no proofs in proofs/\"}]}\n",
+    "cli.json": "{\"schema\":\"dcheck.result/0\",\"tier\":\"fast\",\"status\":\"pass\",\"strict\":false,\"failed\":[],\"skipped\":[],\"checks\":[{\"name\":\"subset\",\"status\":\"pass\"},{\"name\":\"lint\",\"status\":\"pass\"}]}\n",
+    "metadata.json": "{\n  \"schema\": \"cgrep.ci-artifacts/0\",\n  \"recorded_utc\": \"2026-10-14T05:24:21.106971+00:00\",\n  \"revision\": null,\n  \"acceptance_exit_code\": 0,\n  \"complete_success\": true,\n  \"files\": [\n    {\n      \"path\": \"toolchain-selftest.log\",\n      \"bytes\": 7880,\n      \"sha256\": \"5086f8d0b2a77be7d9e6bfc387f5b1596ffab70636175925511eaeaba13f9473\"\n    },\n    {\n      \"path\": \"acceptance.log\",\n      \"bytes\": 9376,\n      \"sha256\": \"363fe54d38ff85dafbaf72100d1f76c58566f72e7695f26d5580a72bf2b7a168\"\n    },\n    {\n      \"path\": \"c-utils.json\",\n      \"bytes\": 615,\n      \"sha256\": \"6333b6293d918c167cf66b0c150d494a4072757392ca8f45cd11a80510c30b57\"\n    },\n    {\n      \"path\": \"cli.json\",\n      \"bytes\": 176,\n      \"sha256\": \"c8b5bf8a22fc4dfbdf26c67bc69fad6fd2cf5e66a1254c60e3a182e33327f95e\"\n    },\n    {\n      \"path\": \"cgrep.json\",\n      \"bytes\": 881,\n      \"sha256\": \"ce3e0cc2301f48253406aa752e6c4724d1b8afe17d094cc27920559393b37be7\"\n    }\n  ]\n}\n",
+    "toolchain-selftest.log": "Verified checker profile: /home/travers/.local/opt/dcheck-tools/656f4076c75c5f19488a\nmake: Entering directory '/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain'\nvalidation/run.sh\nok   checker profile: integrity and selection guards\nok   fixture passes gate\nok   run: clean test exits 0\nok   run: heap overflow is caught\nok   repl: calls preloaded project code\nok   system includes: third-party header tolerated\nok   system includes: same header as project code is rejected\nok   compiler defines: native gate and run receive values before forced headers\nok   compiler defines: GNU alloca calls remain poisoned\nok   stop hook: no dcheck.conf allows\nok   stop hook: clean project allows\nok   stop hook: unchanged tree reuses the cached pass\nok   stop hook: failing gate blocks\nok   stop hook: unchanged failing tree replays the cached failure\nok   stop hook: allows with a warning after DCHECK_STOP_MAX blocks\nok   guard: lower COVERAGE_MIN -> ask\nok   guard: raise COVERAGE_MIN -> allow\nok   guard: lower default FUZZ_SECONDS -> ask\nok   guard: add pragma ignored -> deny\nok   guard: add no_sanitize via MultiEdit -> deny\nok   guard: ordinary C edit -> allow\nok   guard: rm a test -> ask\nok   guard: git rm proofs -> ask\nok   guard: rm build output -> allow\nok   guard: outside a dcheck project -> allow\nok   install-hooks: merges once, keeps existing settings\nok   install-hooks: refuses a non-project\nok   authority: violations fail the gate with a located diagnostic\nok   authority: skipped without ward.toml\nok   regions: skipped unless configured\nok   regions: skipped when the binary is missing\nok   regions: real binary not built; end-to-end case skipped\nok   regions: findings fail the gate with rule, location and notes\nok   regions: text output keeps the note\nok   tmpdir: tests can write files in TMPDIR on every check, wasm included\nok   deps: a sibling project builds and links with this one, outside its coverage\nok   deps: run links sibling sources and includes\nok   symlinked dcheck finds its own lib/\nok   semantics: cerberus rejection with exit 0 is a failure\nok   semantics: dedicated suite selected and reported in JSON\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 667210 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 667611 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 667868 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 297: 668364 Aborted                 (core dumped) LLVM_PROFILE_FILE=\"$dir/$(basename \"$t\" .c).profraw\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 323: 668662 Aborted                 (core dumped) timeout \"$TEST_TIMEOUT\" valgrind -q --error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite,possible --track-origins=yes \"$bin\" >> \"$log\" 2>&1\nok   semantics: dedicated harness failure with exit zero is rejected\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 671691 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 672069 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 186: 672320 Aborted                 (core dumped) env \"$@\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 297: 673421 Aborted                 (core dumped) LLVM_PROFILE_FILE=\"$dir/$(basename \"$t\" .c).profraw\" timeout \"$TEST_TIMEOUT\" \"$bin\" >> \"$log\" 2>&1\n/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain/bin/dcheck: line 323: 674487 Aborted                 (core dumped) timeout \"$TEST_TIMEOUT\" valgrind -q --error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite,possible --track-origins=yes \"$bin\" >> \"$log\" 2>&1\nok   semantics: dedicated selection retains failing full native tests\nok   semantics: default selection still runs full tests\nok   semantics: empty dedicated suite fails instead of passing vacuously\nok   explain: subset\nok   explain: lint\nok   explain: matrix\nok   explain: analyzer\nok   explain: sanitize\nok   explain: msan\nok   explain: release\nok   explain: wasm\nok   explain: authority\nok   explain: regions\nok   explain: coverage\nok   explain: valgrind\nok   explain: fuzz\nok   explain: semantics\nok   explain: cbmc\nok   explain: dc-zero-memset\nok   explain: dc-zero-brace-init\nok   explain: dc-float-equality\nok   explain: unknown id fails\nok   calloc_use: caught by subset (all: subset lint matrix sanitize msan release coverage)\nok   calloc_use: caught by dcheck fast\nok   calloc_use: --json fast locates it\nok   decl_after_statement: caught by subset (all: subset matrix)\nok   decl_after_statement: caught by dcheck fast\nok   decl_after_statement: --json fast locates it\nok   float_equality: caught by lint (all: lint)\nok   float_equality: caught by dcheck fast\nok   float_equality: --json fast locates it\nok   for_loop_decl: caught by subset (all: subset matrix release)\nok   for_loop_decl: caught by dcheck fast\nok   for_loop_decl: --json fast locates it\nok   fuzz_found_crash: caught by fuzz (all: fuzz)\nok   fuzz_seed_assert: caught by fuzz (all: fuzz)\nok   heap_out_of_bounds: caught by sanitize (all: sanitize msan)\nok   keyword_as_identifier: caught by matrix (all: matrix)\nok   leaked_buffer: caught by valgrind (all: valgrind)\nok   line_comment: caught by subset (all: subset matrix release)\nok   line_comment: caught by dcheck fast\nok   line_comment: --json fast locates it\nok   nan_check_allowed: passes as expected\nok   pointer_width_assumption: caught by wasm (all: wasm)\nok   project_defines: passes as expected\nok   rare_input_overflow: caught by cbmc (all: cbmc)\nok   semantics_harness_assert: caught by semantics (all: sanitize msan release wasm coverage semantics valgrind)\nok   signed_overflow: caught by sanitize (all: sanitize)\nok   stack_alloca: caught by subset (all: subset lint matrix sanitize msan release wasm coverage)\nok   stack_alloca: caught by dcheck fast\nok   stack_alloca: --json fast locates it\nok   stdbool_use: caught by subset (all: subset lint matrix sanitize msan release coverage)\nok   stdbool_use: caught by dcheck fast\nok   stdbool_use: --json fast locates it\nok   unchecked_malloc: caught by analyzer (all: analyzer)\nok   uninitialized_heap_read: caught by msan (all: analyzer msan)\nok   unsequenced_alias: caught by semantics (all: semantics)\nok   untested_code: caught by coverage (all: coverage)\nok   use_after_free: caught by sanitize (all: analyzer sanitize msan)\nok   vla: caught by subset (all: subset matrix)\nok   vla: caught by dcheck fast\nok   vla: --json fast locates it\nok   zero_brace_init: caught by lint (all: lint)\nok   zero_brace_init: caught by dcheck fast\nok   zero_brace_init: --json fast locates it\nok   zero_memset: caught by lint (all: lint)\nok   zero_memset: caught by dcheck fast\nok   zero_memset: --json fast locates it\n\nselftest: PASS\nmake: Leaving directory '/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/dependable-c-agent-toolchain'\n"
+  },
+  "retrieval_receipt_check": "PASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.78% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS subset\nPASS lint\nPASS subset\nPASS lint\nPASS matrix\nPASS analyzer\nPASS sanitize\nPASS msan\nPASS release\nPASS wasm\nPASS coverage 91.44% lines, min 90%\nSKIP authority no ward.toml\nSKIP regions REGIONS_CHECK not set in dcheck.conf\nPASS semantics dedicated harnesses: semantics (4 files); full tests retained in native checks\nPASS valgrind\nPASS fuzz\nSKIP cbmc no proofs in proofs/\nBundle integrity: PASS; recorded acceptance exit 0\n",
+  "logs": {
+    "artifact-tests-final.log": "CI artifact bundle: /tmp/tmp2f58zzyf/upload exit 0 files 5\n....CI artifact bundle: /tmp/tmphhlszrel/upload exit 7 files 1\n..CI artifact bundle: /tmp/tmpmnrhqsce/bundle exit 0 files 5\n.CI artifact bundle: /tmp/tmp2yxdn3tp/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpag4l31er/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpco23_w2o/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmp86a4mxfr/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpg9dvkin7/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpob07ualp/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpengk7s_8/bundle exit 0 files 5\n.CI artifact bundle: /tmp/tmpnzi8fj9f/bundle exit 0 files 5\n.CI artifact bundle: /tmp/tmp_ezwpx5d/bundle exit 0 files 5\n.CI artifact bundle: /tmp/tmpveb7xpbj/bundle exit 0 files 5\nCI artifact bundle: /tmp/tmpey26vryy/bundle exit 0 files 5\n.CI artifact bundle: /tmp/tmpaspnnbeh/bundle exit 7 files 1\n.CI artifact bundle: /tmp/tmp7bjjcrx6/bundle exit 0 files 5\n.\n----------------------------------------------------------------------\nRan 13 tests in 0.176s\n\nOK\n",
+    "ci-tests-final.log": ".......\n----------------------------------------------------------------------\nRan 7 tests in 0.023s\n\nOK\n",
+    "quiet-tests-final.log": "....Quiet benchmark: eligible /tmp/tmpymrf84mq/report.json\n..\n----------------------------------------------------------------------\nRan 6 tests in 0.001s\n\nOK\n",
+    "hash-sensitivity.log": "F\n======================================================================\nFAIL: test_same_length_tamper_rejected (artifact_tests.BundleTests.test_same_length_tamper_rejected)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/travers/projects/cgrep/tests/test_artifacts.py\", line 114, in test_same_length_tamper_rejected\n    with self.assertRaisesRegex(ValueError, \"hash mismatch\"):\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 1 test in 0.002s\n\nFAILED (failures=1)\n",
+    "artifact-pilot.log": "PASS current real receipts collected via EXIT trap and retrieved locally; seeded failure retained\nNOT VERIFIED: fresh CI wrapper, live Gitea upload/download\n",
+    "quiet.log": "Quiet benchmark: not eligible /tmp/cgrep-qualification.qMveIS9Y/quiet-host.json\n"
+  },
+  "sources": {
+    "ci/check_artifacts.py": {
+      "sha256": "e351cee9fc9a8bf6bd67a6c70d1c49e3416c7c90445e0bfb6f60116e8732e3ec",
+      "text": "\"\"\"Verify a downloaded CI bundle's inventory, hashes and recorded status.\n\nThis checks contents, not who uploaded them. --receipts additionally checks\nrequired acceptance results using this checkout's receipt policy.\n\"\"\"\nimport argparse\nimport hashlib\nimport json\nfrom pathlib import Path\nimport re\nimport subprocess\n\nROOT = Path(__file__).resolve().parents[1]\nFILES = {\"toolchain-selftest.log\", \"acceptance.log\", \"c-utils.json\", \"cli.json\", \"cgrep.json\"}\nMAX_FILE = 32 * 1024 * 1024\n\n\ndef read_file(path):\n    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE:\n        raise ValueError(\"unsafe or oversized bundle file: \" + path.name)\n    return path.read_bytes()\n\n\ndef check(bundle):\n    if bundle.is_symlink() or not bundle.is_dir():\n        raise ValueError(\"bundle must be a regular directory\")\n    metadata = json.loads(read_file(bundle / \"metadata.json\"))\n    if not isinstance(metadata, dict) or metadata.get(\"schema\") != \"cgrep.ci-artifacts/0\":\n        raise ValueError(\"unsupported artifact metadata\")\n    status = metadata.get(\"acceptance_exit_code\")\n    if type(status) is not int or not 0 <= status <= 255 or type(metadata.get(\"complete_success\")) is not bool or metadata[\"complete_success\"] != (status == 0):\n        raise ValueError(\"inconsistent acceptance status\")\n    revision = metadata.get(\"revision\")\n    if revision is not None and (not isinstance(revision, str) or not re.fullmatch(\"[0-9a-f]{40}\", revision)):\n        raise ValueError(\"invalid source revision\")\n    entries = metadata.get(\"files\")\n    if not isinstance(entries, list) or len(entries) > len(FILES):\n        raise ValueError(\"invalid file inventory\")\n    seen = set()\n    for item in entries:\n        if not isinstance(item, dict) or not isinstance(item.get(\"path\"), str) or item[\"path\"] not in FILES or item[\"path\"] in seen:\n            raise ValueError(\"unsafe, unknown or duplicate artifact name\")\n        name = item[\"path\"]\n        seen.add(name)\n        data = read_file(bundle / name)\n        if type(item.get(\"bytes\")) is not int or item[\"bytes\"] != len(data) or item.get(\"sha256\") != hashlib.sha256(data).hexdigest():\n            raise ValueError(\"artifact size or hash mismatch: \" + name)\n    if set(p.name for p in bundle.iterdir()) != seen | {\"metadata.json\"}:\n        raise ValueError(\"unlisted bundle contents\")\n    if status == 0 and seen != FILES:\n        raise ValueError(\"successful bundle missing required evidence\")\n    return metadata\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"bundle\", type=Path)\n    parser.add_argument(\"--receipts\", action=\"store_true\")\n    args = parser.parse_args()\n    try:\n        metadata = check(args.bundle)\n        if args.receipts:\n            if metadata[\"acceptance_exit_code\"] != 0:\n                raise ValueError(\"recorded acceptance failed; bundle integrity does not imply PASS\")\n            for name, tier in [(\"c-utils\", \"gate\"), (\"cli\", \"fast\"), (\"cgrep\", \"deep\")]:\n                subprocess.run([\"python3\", \"-I\", str(ROOT / \"tests/check_receipt.py\"), str(args.bundle / (name + \".json\")), tier], check=True)\n    except (OSError, ValueError, subprocess.CalledProcessError) as error:\n        raise SystemExit(\"invalid artifact bundle: \" + str(error))\n    print(\"Bundle integrity: PASS; recorded acceptance exit\", metadata[\"acceptance_exit_code\"])\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    },
+    "ci/collect_artifacts.py": {
+      "sha256": "582047a3a72e8b2e39e25c3d24526cbd95da36c9229171ed931eaf6778120fe2",
+      "text": "\"\"\"Keep only CI logs, selected dcheck receipts, and non-secret provenance.\n\nNever archives the workspace, dependency source, home directory, or credentials.\nPartial/failing receipts are useful evidence and remain marked by the exit code.\n\"\"\"\nimport argparse\nfrom datetime import datetime, timezone\nimport hashlib\nimport json\nfrom pathlib import Path\nimport re\nimport shutil\n\nLOGS = [\"toolchain-selftest.log\", \"acceptance.log\"]\nRECEIPTS = [\"c-utils.json\", \"cli.json\", \"cgrep.json\"]\nMAX_FILE = 32 * 1024 * 1024\n\n\ndef copy_file(source, destination):\n    if source.is_symlink() or not source.is_file() or source.stat().st_size > MAX_FILE:\n        raise ValueError(\"unsafe or oversized artifact: \" + source.name)\n    destination.parent.mkdir(parents=True, exist_ok=True)\n    shutil.copyfile(source, destination)\n    return {\"path\": str(destination.name), \"bytes\": destination.stat().st_size,\n            \"sha256\": hashlib.sha256(destination.read_bytes()).hexdigest()}\n\n\ndef collect(work, output, status, revision):\n    if not 0 <= status <= 255 or (revision and not re.fullmatch(\"[0-9a-f]{40}\", revision)):\n        raise ValueError(\"invalid status or revision\")\n    if output.exists():\n        raise ValueError(\"artifact destination must be fresh\")\n    output.mkdir(parents=True)\n    copied = []\n    for name in LOGS:\n        source = work / name\n        if source.exists():\n            copied.append(copy_file(source, output / name))\n    receipt = None\n    acceptance = work / \"acceptance.log\"\n    if acceptance.is_file():\n        if acceptance.is_symlink() or acceptance.stat().st_size > MAX_FILE:\n            raise ValueError(\"unsafe acceptance log\")\n        match = re.search(r\"^Acceptance receipts: (.+)$\", acceptance.read_text(), re.M)\n        if match:\n            receipt = Path(match.group(1))\n            expected = work.resolve() / \"cgrep/build\"\n            if expected.resolve() != expected or receipt.is_symlink() or receipt.resolve().parent != expected or not re.fullmatch(\"verify\\\\.[A-Za-z0-9]+\", receipt.name):\n                raise ValueError(\"receipt path outside generated build\")\n            for name in RECEIPTS:\n                source = receipt / name\n                if source.exists():\n                    copied.append(copy_file(source, output / name))\n    if status == 0 and (receipt is None or set(item[\"path\"] for item in copied) != set(LOGS + RECEIPTS)):\n        raise ValueError(\"successful CI run missing required artifact evidence\")\n    metadata = {\"schema\": \"cgrep.ci-artifacts/0\", \"recorded_utc\": datetime.now(timezone.utc).isoformat(),\n                \"revision\": revision or None, \"acceptance_exit_code\": status,\n                \"complete_success\": status == 0, \"files\": copied}\n    (output / \"metadata.json\").write_text(json.dumps(metadata, indent=2) + \"\\n\")\n    print(\"CI artifact bundle:\", output, \"exit\", status, \"files\", len(copied), flush=True)\n    return metadata\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"work\", type=Path)\n    parser.add_argument(\"output\", type=Path)\n    parser.add_argument(\"--status\", type=int, required=True)\n    parser.add_argument(\"--revision\", default=\"\")\n    args = parser.parse_args()\n    collect(args.work, args.output, args.status, args.revision)\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    },
+    "tests/test_artifacts.py": {
+      "sha256": "f51c9255021809c92aaf9dd00dda4bfca1c50a475b8876c228704f6277689044",
+      "text": "\"\"\"Allow-list, tamper, failure-status, and runner-cleanup artifact sensors.\"\"\"\nimport hashlib\nimport importlib.util\nimport json\nfrom pathlib import Path\nimport shutil\nimport subprocess\nimport tempfile\nimport unittest\nimport zipfile\n\nROOT = Path(__file__).resolve().parents[1]\nspec = importlib.util.spec_from_file_location(\"artifacts\", ROOT / \"ci/collect_artifacts.py\")\nartifacts = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(artifacts)\nspec = importlib.util.spec_from_file_location(\"bundle_check\", ROOT / \"ci/check_artifacts.py\")\nbundle_check = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(bundle_check)\n\n\ndef fixture(root):\n    work = root / \"job\"\n    receipt = work / \"cgrep/build/verify.abcdef\"\n    receipt.mkdir(parents=True)\n    (work / \"acceptance.log\").write_text(f\"Acceptance receipts: {receipt}\\nacceptance: PASS\\n\")\n    (work / \"toolchain-selftest.log\").write_text(\"selftest: PASS\\n\")\n    for name in artifacts.RECEIPTS:\n        (receipt / name).write_text('{\"schema\":\"fixture\"}\\n')\n    (work / \".runner\").write_text(\"secret registration data\")\n    (work / \"tea.yaml\").write_text(\"secret authentication data\")\n    return work, receipt\n\n\nclass ArtifactTests(unittest.TestCase):\n    def test_allowlist_survives_job_cleanup(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            output = root / \"upload\"\n            metadata = artifacts.collect(work, output, 0, \"a\" * 40)\n            self.assertTrue(metadata[\"complete_success\"])\n            self.assertEqual(set(p.name for p in output.iterdir()), set(artifacts.LOGS + artifacts.RECEIPTS + [\"metadata.json\"]))\n            shutil.rmtree(work)\n            self.assertEqual((output / \"cgrep.json\").read_text(), '{\"schema\":\"fixture\"}\\n')\n            self.assertNotIn(\"secret\", \"\".join(p.read_text() for p in output.iterdir()))\n            self.assertEqual(bundle_check.check(output), metadata)\n            for entry in metadata[\"files\"]:\n                self.assertEqual(hashlib.sha256((output / entry[\"path\"]).read_bytes()).hexdigest(), entry[\"sha256\"])\n\n    def test_failure_without_receipts_is_marked(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work = root / \"job\"\n            work.mkdir()\n            (work / \"toolchain-selftest.log\").write_text(\"seeded selftest failure\\n\")\n            result = artifacts.collect(work, root / \"upload\", 7, \"\")\n            self.assertEqual(result[\"acceptance_exit_code\"], 7)\n            self.assertFalse(result[\"complete_success\"])\n            with self.assertRaises(ValueError):\n                artifacts.collect(work, root / \"false-pass\", 0, \"\")\n\n    def test_receipt_escape_and_symlink_rejected(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, receipt = fixture(root)\n            (work / \"acceptance.log\").write_text(f\"Acceptance receipts: {root}\\n\")\n            with self.assertRaises(ValueError):\n                artifacts.collect(work, root / \"escape\", 1, \"\")\n            (work / \"acceptance.log\").write_text(f\"Acceptance receipts: {receipt}\\n\")\n            (receipt / \"cli.json\").unlink()\n            (receipt / \"cli.json\").symlink_to(work / \".runner\")\n            with self.assertRaises(ValueError):\n                artifacts.collect(work, root / \"link\", 0, \"\")\n\n    def test_exit_trap_preserves_failure(self):\n        text = (ROOT / \"ci/verify.sh\").read_text()\n        trap = text[text.index(\"collect_receipts() {\"):text.index(\"cp -a\")]\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            script = 'set -euo pipefail\\nroot=\"$1\"\\nwork=\"$2\"\\n' + trap + '\\nexit 7\\n'\n            sandbox = root / \"script\"\n            (sandbox / \"ci\").mkdir(parents=True)\n            shutil.copyfile(ROOT / \"ci/collect_artifacts.py\", sandbox / \"ci/collect_artifacts.py\")\n            result = subprocess.run([\"bash\", \"-c\", script, \"fixture\", str(sandbox), str(work)], capture_output=True)\n            self.assertEqual(result.returncode, 7)\n            metadata = json.loads((sandbox / \"ci-artifacts/metadata.json\").read_text())\n            self.assertEqual(metadata[\"acceptance_exit_code\"], 7)\n\n    def test_collection_failure_preserves_original_failure(self):\n        text = (ROOT / \"ci/verify.sh\").read_text()\n        trap = text[text.index(\"collect_receipts() {\"):text.index(\"cp -a\")]\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, receipt = fixture(root)\n            (receipt / \"cli.json\").unlink()\n            (receipt / \"cli.json\").symlink_to(work / \".runner\")\n            script = 'set -euo pipefail\\nroot=\"$1\"\\nwork=\"$2\"\\n' + trap + '\\nexit 7\\n'\n            sandbox = root / \"script\"\n            (sandbox / \"ci\").mkdir(parents=True)\n            shutil.copyfile(ROOT / \"ci/collect_artifacts.py\", sandbox / \"ci/collect_artifacts.py\")\n            result = subprocess.run([\"bash\", \"-c\", script, \"fixture\", str(sandbox), str(work)], capture_output=True, text=True)\n            self.assertEqual(result.returncode, 7)\n            self.assertIn(\"unsafe\", result.stderr)\n            self.assertFalse((sandbox / \"ci-artifacts/metadata.json\").exists())\n\n    def test_collection_failure_cannot_pass(self):\n        text = (ROOT / \"ci/verify.sh\").read_text()\n        trap = text[text.index(\"collect_receipts() {\"):text.index(\"cp -a\")]\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            (work / \"toolchain-selftest.log\").unlink()\n            script = 'set -euo pipefail\\nroot=\"$1\"\\nwork=\"$2\"\\n' + trap + '\\nexit 0\\n'\n            sandbox = root / \"script\"\n            (sandbox / \"ci\").mkdir(parents=True)\n            shutil.copyfile(ROOT / \"ci/collect_artifacts.py\", sandbox / \"ci/collect_artifacts.py\")\n            result = subprocess.run([\"bash\", \"-c\", script, \"fixture\", str(sandbox), str(work)], capture_output=True)\n            self.assertNotEqual(result.returncode, 0)\n\n\nclass BundleTests(unittest.TestCase):\n    def test_same_length_tamper_rejected(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            output = root / \"bundle\"\n            artifacts.collect(work, output, 0, \"a\" * 40)\n            path = output / \"cgrep.json\"\n            path.write_bytes(path.read_bytes().replace(b\"fixture\", b\"fixturE\"))\n            with self.assertRaisesRegex(ValueError, \"hash mismatch\"):\n                bundle_check.check(output)\n\n    def test_inventory_and_status_tampering_rejected(self):\n        for defect in [\"duplicate\", \"escape\", \"unlisted\", \"symlink\", \"missing\", \"status\", \"bool-status\"]:\n            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:\n                root = Path(temporary)\n                work, _ = fixture(root)\n                output = root / \"bundle\"\n                metadata = artifacts.collect(work, output, 0, \"a\" * 40)\n                if defect == \"duplicate\":\n                    metadata[\"files\"] = [metadata[\"files\"][0], metadata[\"files\"][0]]\n                elif defect == \"escape\":\n                    metadata[\"files\"][0][\"path\"] = \"../.runner\"\n                elif defect == \"unlisted\":\n                    (output / \"tea.yaml\").write_text(\"seeded secret\")\n                elif defect == \"symlink\":\n                    (output / \"cli.json\").unlink()\n                    (output / \"cli.json\").symlink_to(work / \".runner\")\n                elif defect == \"missing\":\n                    (output / \"cli.json\").unlink()\n                    metadata[\"files\"] = [item for item in metadata[\"files\"] if item[\"path\"] != \"cli.json\"]\n                elif defect == \"status\":\n                    metadata[\"complete_success\"] = False\n                else:\n                    metadata[\"acceptance_exit_code\"] = True\n                (output / \"metadata.json\").write_text(json.dumps(metadata))\n                with self.assertRaises(ValueError):\n                    bundle_check.check(output)\n\n    def test_metadata_and_file_bounds(self):\n        self.assertEqual(bundle_check.FILES, set(artifacts.LOGS + artifacts.RECEIPTS))\n        self.assertEqual(bundle_check.MAX_FILE, artifacts.MAX_FILE)\n        for name in [\"metadata.json\", \"acceptance.log\"]:\n            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:\n                root = Path(temporary)\n                work, _ = fixture(root)\n                output = root / \"bundle\"\n                artifacts.collect(work, output, 0, \"a\" * 40)\n                with (output / name).open(\"r+b\") as stream:\n                    stream.truncate(bundle_check.MAX_FILE + 1)\n                with self.assertRaisesRegex(ValueError, \"oversized\"):\n                    bundle_check.check(output)\n\n    def test_metadata_and_directory_symlinks(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            output = root / \"bundle\"\n            artifacts.collect(work, output, 0, \"a\" * 40)\n            alias = root / \"alias\"\n            alias.symlink_to(output, target_is_directory=True)\n            with self.assertRaisesRegex(ValueError, \"regular directory\"):\n                bundle_check.check(alias)\n            (output / \"metadata.json\").unlink()\n            (output / \"metadata.json\").symlink_to(work / \".runner\")\n            with self.assertRaisesRegex(ValueError, \"unsafe\"):\n                bundle_check.check(output)\n\n    def test_partial_failure_is_valid_evidence_not_success(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work = root / \"job\"\n            work.mkdir()\n            (work / \"acceptance.log\").write_text(\"seeded failure\\n\")\n            output = root / \"bundle\"\n            artifacts.collect(work, output, 7, \"\")\n            self.assertEqual(bundle_check.check(output)[\"acceptance_exit_code\"], 7)\n            result = subprocess.run([\"python3\", \"-I\", str(ROOT / \"ci/check_artifacts.py\"), str(output), \"--receipts\"], capture_output=True, text=True)\n            self.assertNotEqual(result.returncode, 0)\n            self.assertIn(\"recorded acceptance failed\", result.stderr)\n\n    def test_hashes_do_not_prove_acceptance_receipts(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            output = root / \"bundle\"\n            artifacts.collect(work, output, 0, \"a\" * 40)\n            self.assertTrue(bundle_check.check(output)[\"complete_success\"])\n            result = subprocess.run([\"python3\", \"-I\", str(ROOT / \"ci/check_artifacts.py\"), str(output), \"--receipts\"], capture_output=True, text=True)\n            self.assertNotEqual(result.returncode, 0)\n            self.assertIn(\"schema\", result.stderr)\n\n    def test_local_archive_retrieval_after_job_cleanup(self):\n        with tempfile.TemporaryDirectory() as temporary:\n            root = Path(temporary)\n            work, _ = fixture(root)\n            output = root / \"bundle\"\n            expected = artifacts.collect(work, output, 0, \"a\" * 40)\n            archive = root / \"artifact.zip\"\n            with zipfile.ZipFile(archive, \"w\") as stream:\n                for path in output.iterdir():\n                    stream.write(path, path.name)\n            shutil.rmtree(work)\n            shutil.rmtree(output)\n            retrieved = root / \"retrieved\"\n            with zipfile.ZipFile(archive) as stream:\n                stream.extractall(retrieved)\n            self.assertEqual(bundle_check.check(retrieved), expected)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    },
+    "ci/verify.sh": {
+      "sha256": "031160c852c9149717bdc459cc4dd95ea4868c8cce334e353e4e1fd2fe2396d1",
+      "text": "#!/usr/bin/env bash\n# Trusted Gitea push only. A repository-scoped host runner owns this profile.\nset -euo pipefail\nulimit -c 0\nroot=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/..\" && pwd)\"\n[[ \"$(uname -s)\" == Linux && \"$(uname -m)\" == x86_64 ]] || { echo 'CI requires Linux x86_64' >&2; exit 1; }\n: \"${XDG_RUNTIME_DIR:?user systemd runtime required}\"\n: \"${RUNNER_TEMP:?runner scratch required}\"\ncommand -v flock >/dev/null\ncommand -v systemd-run >/dev/null\ncommand -v timeout >/dev/null\ncommand -v tea >/dev/null\n[[ ! -e \"$root/ci-artifacts\" && ! -L \"$root/ci-artifacts\" ]] || {\n    echo 'CI artifact destination already exists; use a fresh checkout' >&2\n    exit 1\n}\nsystemctl --user show-environment >/dev/null\n# Serialize acceptance runs even if this repository gains another runner.\nexec 9>\"$XDG_RUNTIME_DIR/cgrep-acceptance.lock\"\nflock 9\nwork=\"$(mktemp -d \"$RUNNER_TEMP/cgrep-acceptance.XXXXXX\")\"\nprintf 'CI scratch: %s\\n' \"$work\"\n# EXIT collection runs after pass/failure, before the runner removes its temp.\n# Preserve the check's original failure; a collection failure also fails CI.\ncollect_receipts() {\n    status=$?\n    trap - EXIT\n    if python3 -I \"$root/ci/collect_artifacts.py\" \"$work\" \"$root/ci-artifacts\" \\\n        --status \"$status\" --revision \"${GITHUB_SHA:-}\"; then\n        exit \"$status\"\n    fi\n    if [[ \"$status\" -ne 0 ]]; then exit \"$status\"; fi\n    exit 1\n}\ntrap collect_receipts EXIT\ncp -a \"$root\" \"$work/cgrep\"\npython3 -I \"$root/ci/fetch_dependencies.py\" \"$root/ci/dependencies.json\" \"$work\"\ntoolchain=\"$work/dependable-c-agent-toolchain\"\n# Validate provisioned tools against the checked-in source policy, not just PATH.\n# Provisioning is separate; no silently downloaded/unpinned CI installers.\n\"$toolchain/bin/dcheck-tools\" check\n\"$toolchain/bin/dcheck-tools\" exec systemd-run --user --scope -q \\\n    -p MemoryMax=3G -p MemorySwapMax=0 -p RuntimeMaxSec=1200 nice -n 15 \\\n    make -j1 -C \"$toolchain\" selftest 2>&1 | tee \"$work/toolchain-selftest.log\"\ngrep -Fx 'selftest: PASS' \"$work/toolchain-selftest.log\"\ntimeout --signal=TERM --kill-after=30s 30m make -j1 -C \"$work/cgrep\" verify \\\n    CUTILS=\"$work/c-utils\" DCHECK=\"$toolchain/bin/dcheck\" \\\n    2>&1 | tee \"$work/acceptance.log\"\ngrep -F 'acceptance: PASS ' \"$work/acceptance.log\"\nprintf 'CI acceptance: PASS\\n'\n"
+    }
+  },
+  "recipes": {
+    "artifact_pilot.py": "\"\"\"Composite local EXIT/collection/retrieval pilot, not a fresh CI job.\nUses latest real acceptance plus a retained selftest from the unchanged toolchain.\nOnly disposable job copies are removed; original evidence remains untouched.\n\"\"\"\nimport hashlib\nimport json\nimport os\nfrom pathlib import Path\nimport re\nimport shutil\nimport subprocess\nimport tempfile\nimport zipfile\n\nROOT=Path('/home/travers/projects/cgrep');WORK=Path('/tmp/cgrep-qualification.qMveIS9Y')\nACCEPTANCE=Path('/tmp/cgrep-count-format.wMMo2q/acceptance.log')\nSELFTEST=Path('/tmp/cgrep-followup.lzy1oD/ci-pilot/cgrep-acceptance.DZNTxc/toolchain-selftest.log')\ntext=ACCEPTANCE.read_text();receipt=Path(re.search(r'^Acceptance receipts: (.+)$',text,re.M).group(1))\nassert 'acceptance: PASS ' in text and 'selftest: PASS\\n' in SELFTEST.read_text()\nscript=(ROOT/'ci/verify.sh').read_text();trap=script[script.index('collect_receipts() {'):script.index('cp -a')]\nprovenance={'schema':'cgrep.artifact-local-pilot/0','fresh_ci_job':False,'live_upload_verified':False,\n            'limits':['composite logs, not a fresh wrapper selftest/acceptance run','local ZIP retrieval, not Gitea upload/download','manifest hashes check contents, not uploader authenticity'],\n            'source_logs':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [ACCEPTANCE,SELFTEST]},\n            'receipt_sources':{name:hashlib.sha256((receipt/name).read_bytes()).hexdigest() for name in ['c-utils.json','cli.json','cgrep.json']},'cases':[]}\nfor status,label in [(0,'success'),(7,'seeded-exit-failure')]:\n sandbox=WORK/('pilot-'+label);(sandbox/'ci').mkdir(parents=True)\n shutil.copyfile(ROOT/'ci/collect_artifacts.py',sandbox/'ci/collect_artifacts.py')\n with tempfile.TemporaryDirectory(prefix='disposable-job-',dir=WORK) as temporary:\n  job=Path(temporary);target=job/'cgrep/build'/receipt.name;target.mkdir(parents=True)\n  for name in ['c-utils.json','cli.json','cgrep.json']:shutil.copyfile(receipt/name,target/name)\n  (job/'acceptance.log').write_text(text.replace('Acceptance receipts: '+str(receipt),'Acceptance receipts: '+str(target),1))\n  shutil.copyfile(SELFTEST,job/'toolchain-selftest.log')\n  (job/'.runner').write_text('seeded credential exclusion sentinel\\n')\n  (job/'tea.yaml').write_text('seeded authentication exclusion sentinel\\n')\n  command='set -euo pipefail\\nroot=\"$1\"\\nwork=\"$2\"\\n'+trap+f'\\nexit {status}\\n'\n  result=subprocess.run(['bash','-c',command,'pilot',str(sandbox),str(job)],capture_output=True,text=True,env=dict(os.environ,GITHUB_SHA=''))\n  (sandbox/'exit-trap.log').write_text(result.stdout+result.stderr)\n  assert result.returncode==status,(status,result)\n  bundle=sandbox/'ci-artifacts';metadata=json.loads((bundle/'metadata.json').read_text())\n  assert metadata['acceptance_exit_code']==status and metadata['revision'] is None\n  assert set(p.name for p in bundle.iterdir())=={'metadata.json','acceptance.log','toolchain-selftest.log','c-utils.json','cli.json','cgrep.json'}\n  archive=sandbox/'artifact.zip'\n  with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as stream:\n   for path in sorted(bundle.iterdir()):stream.write(path,path.name)\n  disposable=job\n # TemporaryDirectory cleaned only this pilot job. Retained originals are untouched.\n assert not disposable.exists()\n retrieved=sandbox/'retrieved'\n with zipfile.ZipFile(archive) as stream:stream.extractall(retrieved)\n for name in ['c-utils.json','cli.json','cgrep.json']:\n  assert hashlib.sha256((retrieved/name).read_bytes()).hexdigest()==provenance['receipt_sources'][name]\n check=['python3','-I',str(ROOT/'ci/check_artifacts.py'),str(retrieved)]+(['--receipts'] if status==0 else [])\n result=subprocess.run(check,capture_output=True,text=True)\n (sandbox/'retrieval-check.log').write_text(result.stdout+result.stderr);assert result.returncode==0,result\n if status:\n  refusal=subprocess.run(check+['--receipts'],capture_output=True,text=True)\n  (sandbox/'false-pass-refusal.log').write_text(refusal.stdout+refusal.stderr)\n  assert refusal.returncode!=0 and 'recorded acceptance failed' in refusal.stderr\n provenance['cases'].append({'label':label,'exit':status,'manifest':metadata,'disposable_job_removed':True,'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'retrieval_log':result.stdout})\n(WORK/'artifact-pilot.json').write_text(json.dumps(provenance,indent=2)+'\\n')\nprint('PASS current real receipts collected via EXIT trap and retrieved locally; seeded failure retained')\nprint('NOT VERIFIED: fresh CI wrapper, live Gitea upload/download')\n",
+    "bench_slices.py": "\"\"\"Full-output, fixed-worker ablation: baseline/count/filename/combined.\nUses the production benchmark generator, byte oracle and timing machinery.\n\"\"\"\nimport hashlib\nimport importlib.util\nimport json\nimport sys\nfrom pathlib import Path\n\nROOT=Path('/home/travers/projects/cgrep')\nWORK=Path('/tmp/cgrep-qualification.qMveIS9Y')\nspec=importlib.util.spec_from_file_location('benchmark',ROOT/'tests/benchmark_parallel.py')\nbenchmark=importlib.util.module_from_spec(spec);spec.loader.exec_module(benchmark)\ncommands=benchmark.commands\nbinaries={'count-only':WORK/'count-only/cgrep','format-only':WORK/'format-only/cgrep'}\n\n\ndef variants(binary, pattern, paths, numbers, gnu_grep, baseline=None, cgrep_threads=False):\n    result=commands(binary,pattern,paths,numbers,gnu_grep,baseline,cgrep_threads)\n    number=['-n'] if numbers else []\n    for name,extra in binaries.items():\n        result[name]=[str(extra),*number,'--',pattern,*paths]\n        for jobs in [1,2,4,8]:\n            result[f'{name}-j{jobs}']=[str(extra),*number,f'-j{jobs}','--',pattern,*paths]\n    return result\n\n\nbenchmark.commands=variants\nsys.argv=['benchmark',str(WORK/'combined/cgrep'),'--baseline',str(WORK/'baseline-cgrep'),'--cgrep-threads','--repeats','21','--output',str(WORK/f'slices-{sys.argv[1]}.json')]+(['--numbers'] if sys.argv[1]=='numbered' else [])\nbenchmark.main()\noutput=Path(sys.argv[sys.argv.index('--output')+1]);report=json.loads(output.read_text())\nreport['ablation_sha256']={name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in binaries.items()}\nreport['timed_validation']='every byte/status/stderr, after wall timer stops'\nreport['source_sha256']=hashlib.sha256((ROOT/'src/cgrep.c').read_bytes()).hexdigest()\noutput.write_text(json.dumps(report,indent=2)+'\\n')\n"
+  },
+  "authority": "local checks only; no install, commit, push, runner/credential changes or live service call",
+  "limits": [
+    "prior native/semantic acceptance unchanged; no fresh full acceptance repeated",
+    "composite local pilot uses latest acceptance and retained unchanged-toolchain selftest",
+    "local ZIP is not live Gitea protocol or retention validation",
+    "hashes check contents, not authenticity",
+    "idle host/window required for fixed-config qualification"
+  ]
+}

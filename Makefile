@@ -24,6 +24,10 @@ test: $(TESTS)
 $(BUILD)/test_%: tests/test_%.c cmd/main.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ $< $(SRCS)
 
+# The vector variants include the portable suites.
+$(BUILD)/test_find_simd: tests/test_find.c
+$(BUILD)/test_count_simd: tests/test_count.c
+
 $(BUILD)/sem_%: semantics/sem_%.c $(wildcard tests/test_*.c) $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ $< $(SRCS)
 

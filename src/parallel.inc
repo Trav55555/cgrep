@@ -19,27 +19,49 @@
 #define CGREP_THREAD_CREATE pthread_create
 #endif
 
-#define PARALLEL_WORKERS 8
-#define CHANNEL_BYTES 65536
+#define CHANNEL_SLOTS 2
+#ifndef CHANNEL_BYTES
+#define CHANNEL_BYTES 1048576
+#endif
+/* Workers poll the shared cancellation flag once per this many refills. */
+#define CANCEL_POLL 8
 
-typedef enum { JOB_IDLE, JOB_ASSIGNED, JOB_RUNNING, JOB_CHUNK, JOB_DONE, JOB_SERIAL } JobState;
+/* FREE slots belong to their worker; published slots to the coordinator. */
+typedef enum { SLOT_FREE, SLOT_CHUNK, SLOT_DONE, SLOT_SERIAL } SlotState;
 typedef struct ParallelPool ParallelPool;
+typedef struct {
+    SlotState state;
+    size_t used;
+    ScanResult result;
+    char bytes[CHANNEL_BYTES];
+} ParallelSlot;
+
+/* Worker w scans paths w, w + jobs, ... and publishes them to alternating
+ * slots; the coordinator drains them in the same alternation, so argument
+ * order holds while a worker scans one file ahead of consumption. */
 typedef struct {
     ParallelPool *pool;
     pthread_t thread;
     pthread_cond_t changed;
+    int first;
+    int fill;  /* worker-written slot */
+    int drain; /* next slot the coordinator consumes */
+    unsigned polls;
     const char *path;
-    JobState state;
-    ScanResult result;
+    char *bytes; /* the fill slot's storage while scanning */
     size_t used;
-    char bytes[CHANNEL_BYTES];
+    ScanResult result;
+    ParallelSlot slots[CHANNEL_SLOTS];
 } ParallelWorker;
 
 struct ParallelPool {
     pthread_mutex_t mutex;
     int cancel;
+    int jobs;
+    int count;
+    char **paths;
     const Search *search;
-    ParallelWorker workers[PARALLEL_WORKERS];
+    ParallelWorker *workers; /* one per started job */
 };
 
 static void pool_lock(ParallelPool *pool)
@@ -60,9 +82,10 @@ static void worker_wait(ParallelWorker *worker)
         abort();
 }
 
+/* The worker and the coordinator can both wait on one condition. */
 static void worker_signal(ParallelWorker *worker)
 {
-    if (pthread_cond_signal(&worker->changed) != 0)
+    if (pthread_cond_broadcast(&worker->changed) != 0)
         abort();
 }
 
@@ -72,60 +95,96 @@ static int worker_cancelled(void *context)
     int cancel;
 
     worker = (ParallelWorker *)context;
+    if (++worker->polls % CANCEL_POLL != 0)
+        return 0;
     pool_lock(worker->pool);
     cancel = worker->pool->cancel;
     pool_unlock(worker->pool);
     return cancel;
 }
 
-/* Publication transfers the fixed channel to the coordinator until ack. */
+/* Hand the filled slot to the coordinator and continue in the other one
+ * once it is free. Zero means cancellation. */
 static int worker_publish(ParallelWorker *worker)
 {
     ParallelPool *pool;
+    ParallelSlot *slot;
     int ok;
 
     pool = worker->pool;
     pool_lock(pool);
     if (!pool->cancel) {
-        worker->state = JOB_CHUNK;
+        slot = &worker->slots[worker->fill];
+        slot->used = worker->used;
+        slot->state = SLOT_CHUNK;
+        worker->fill = (worker->fill + 1) % CHANNEL_SLOTS;
         worker_signal(worker);
-        while (worker->state == JOB_CHUNK && !pool->cancel)
+        while (worker->slots[worker->fill].state != SLOT_FREE && !pool->cancel)
             worker_wait(worker);
+        worker->bytes = worker->slots[worker->fill].bytes;
+        worker->used = 0;
     }
     ok = !pool->cancel;
     pool_unlock(pool);
     return ok;
 }
 
-static int channel_write(void *context, const char *bytes, size_t n)
+static int channel_write(void *context, const CuStr *parts, size_t count)
 {
     ParallelWorker *worker;
+    size_t i;
     size_t at;
     size_t take;
+    size_t room;
+    size_t total;
 
     worker = (ParallelWorker *)context;
-    at = 0;
-    while (at < n) {
-        if (worker->used == sizeof worker->bytes && !worker_publish(worker)) {
-            errno = ECANCELED;
-            return 0;
+    room = CHANNEL_BYTES - worker->used;
+    total = 0;
+    for (i = 0; i < count; i++) {
+        if (parts[i].len > room - total)
+            break;
+        total += parts[i].len;
+    }
+    /* Fitting records stay private; exact fills still publish lazily. */
+    if (i == count) {
+        at = worker->used;
+        for (i = 0; i < count; i++) {
+            if (parts[i].len == 1) {
+                worker->bytes[at++] = parts[i].ptr[0];
+            } else if (parts[i].len != 0) {
+                memcpy(worker->bytes + at, parts[i].ptr, parts[i].len);
+                at += parts[i].len;
+            }
         }
-        take = sizeof worker->bytes - worker->used;
-        if (take > n - at)
-            take = n - at;
-        memcpy(worker->bytes + worker->used, bytes + at, take);
-        worker->used += take;
-        at += take;
+        worker->used = at;
+        return 1;
+    }
+    for (i = 0; i < count; i++) {
+        at = 0;
+        while (at < parts[i].len) {
+            if (worker->used == CHANNEL_BYTES && !worker_publish(worker)) {
+                errno = ECANCELED;
+                return 0;
+            }
+            take = CHANNEL_BYTES - worker->used;
+            if (take > parts[i].len - at)
+                take = parts[i].len - at;
+            memcpy(worker->bytes + worker->used, parts[i].ptr + at, take);
+            worker->used += take;
+            at += take;
+        }
     }
     return 1;
 }
 
-static JobState worker_scan(ParallelWorker *worker, CuVec *buffer)
+static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer)
 {
     struct stat st;
     CuInput input;
     FILE *file;
     Search search;
+    Finder finder;
     ScanResult result;
     int fd;
     int closed;
@@ -146,7 +205,7 @@ static JobState worker_scan(ParallelWorker *worker, CuVec *buffer)
         result.system_error = saved;
     } else if (!S_ISREG(st.st_mode)) {
         close(fd);
-        return JOB_SERIAL;
+        return SLOT_SERIAL;
     } else {
         file = fdopen(fd, "rb");
         if (file == NULL) {
@@ -156,6 +215,7 @@ static JobState worker_scan(ParallelWorker *worker, CuVec *buffer)
             result.system_error = saved;
         } else {
             search = *worker->pool->search;
+            search.finder = &finder;
             search.out = NULL;
             search.write = channel_write;
             search.cancelled = worker_cancelled;
@@ -179,32 +239,43 @@ static JobState worker_scan(ParallelWorker *worker, CuVec *buffer)
     /* Terminal publication transfers any residual bytes with the result.
      * Tiny files need no separate chunk/ack round trip. */
     worker->result = result;
-    return JOB_DONE;
+    return SLOT_DONE;
 }
 
 static void *worker_main(void *context)
 {
     ParallelWorker *worker;
     ParallelPool *pool;
+    ParallelSlot *slot;
     CuArena arena;
     CuVec buffer;
-    JobState terminal;
+    SlotState terminal;
+    int k;
 
     worker = (ParallelWorker *)context;
     pool = worker->pool;
     cu_arena_init(&arena);
     CU_VEC_INIT(&buffer, &arena, char);
     pool_lock(pool);
-    for (;;) {
-        while (worker->state != JOB_ASSIGNED && !pool->cancel)
+    for (k = worker->first; k < pool->count; k += pool->jobs) {
+        while (worker->slots[worker->fill].state != SLOT_FREE && !pool->cancel)
             worker_wait(worker);
         if (pool->cancel)
             break;
-        worker->state = JOB_RUNNING;
+        worker->path = pool->paths[k];
+        worker->bytes = worker->slots[worker->fill].bytes;
+        worker->used = 0;
         pool_unlock(pool);
         terminal = worker_scan(worker, &buffer);
         pool_lock(pool);
-        worker->state = terminal;
+        /* After cancellation the fill slot may not be free; publish nothing. */
+        if (pool->cancel)
+            break;
+        slot = &worker->slots[worker->fill];
+        slot->used = worker->used;
+        slot->result = worker->result;
+        slot->state = terminal;
+        worker->fill = (worker->fill + 1) % CHANNEL_SLOTS;
         worker_signal(worker);
     }
     pool_unlock(pool);
@@ -212,13 +283,14 @@ static void *worker_main(void *context)
     return NULL;
 }
 
-static int regular_paths(char **paths, int count)
+/* Workers never read standard input. Other non-regular paths fall back to
+ * serial search when the coordinator reaches them. */
+static int named_paths(char **paths, int count)
 {
-    struct stat st;
     int i;
 
     for (i = 0; i < count; i++) {
-        if (strcmp(paths[i], "-") == 0 || stat(paths[i], &st) != 0 || !S_ISREG(st.st_mode))
+        if (strcmp(paths[i], "-") == 0)
             return 0;
     }
     return 1;
@@ -241,6 +313,7 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
 {
     ParallelPool *pool;
     ParallelWorker *worker;
+    ParallelSlot *slot;
     pthread_attr_t attributes;
     ScanResult result;
     CuArena serial_arena;
@@ -248,15 +321,15 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
     int initialized;
     int created;
     int i;
-    int next;
+    int s;
     int code;
     int matched;
     int failed;
     int attr_ready;
     size_t used;
-    JobState state;
+    SlotState state;
 
-    if (!regular_paths(paths, count))
+    if (!named_paths(paths, count))
         return 0;
     if (jobs > count)
         jobs = count;
@@ -266,10 +339,21 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
         *status = 2;
         return 1;
     }
+    pool->workers = (ParallelWorker *)CGREP_POOL_ALLOC((size_t)jobs * sizeof *pool->workers);
+    if (pool->workers == NULL) {
+        free(pool);
+        fputs("cgrep: out of memory starting workers\n", err);
+        *status = 2;
+        return 1;
+    }
     pool->cancel = 0;
+    pool->jobs = jobs;
+    pool->count = count;
+    pool->paths = paths;
     pool->search = search;
     code = pthread_mutex_init(&pool->mutex, NULL);
     if (code != 0) {
+        free(pool->workers);
         free(pool);
         fprintf(err, "cgrep: worker startup: %s\n", strerror(code));
         *status = 2;
@@ -281,12 +365,20 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
     for (i = 0; i < jobs; i++) {
         worker = &pool->workers[i];
         worker->pool = pool;
+        worker->first = i;
+        worker->fill = 0;
+        worker->drain = 0;
+        worker->polls = 0;
         worker->path = NULL;
-        worker->state = JOB_IDLE;
+        worker->bytes = NULL;
         worker->used = 0;
         worker->result.matched = 0;
         worker->result.error = SCAN_OK;
         worker->result.system_error = 0;
+        for (s = 0; s < CHANNEL_SLOTS; s++) {
+            worker->slots[s].state = SLOT_FREE;
+            worker->slots[s].used = 0;
+        }
         code = pthread_cond_init(&worker->changed, NULL);
         if (code != 0)
             break;
@@ -315,42 +407,36 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
     if (code != 0) {
         fprintf(err, "cgrep: worker startup: %s\n", strerror(code));
     } else {
-        pool_lock(pool);
-        for (i = 0; i < jobs; i++) {
-            pool->workers[i].path = paths[i];
-            pool->workers[i].state = JOB_ASSIGNED;
-            worker_signal(&pool->workers[i]);
-        }
-        pool_unlock(pool);
         for (i = 0; i < count; i++) {
             worker = &pool->workers[i % jobs];
             pool_lock(pool);
             for (;;) {
-                while (worker->state != JOB_CHUNK && worker->state != JOB_DONE && worker->state != JOB_SERIAL)
+                slot = &worker->slots[worker->drain];
+                while (slot->state == SLOT_FREE)
                     worker_wait(worker);
-                state = worker->state;
-                used = worker->used;
+                state = slot->state;
+                used = slot->used;
+                result = slot->result;
                 if (used != 0) {
-                    /* CHUNK/DONE ownership freezes these bytes until ack.
+                    /* A published slot's bytes stay frozen until it is freed.
                      * No output I/O while holding the shared pool mutex. */
                     pool_unlock(pool);
-                    if (fwrite(worker->bytes, 1, used, out) != used || fflush(out) != 0 || ferror(out)) {
+                    if (fwrite(slot->bytes, 1, used, out) != used || fflush(out) != 0 || ferror(out)) {
                         failed = 1;
                         fputs("cgrep: output error\n", err);
                         goto joined_cleanup;
                     }
                     pool_lock(pool);
-                    worker->used = 0;
                 }
-                if (state != JOB_CHUNK)
-                    break;
-                worker->state = JOB_RUNNING;
+                slot->used = 0;
+                slot->state = SLOT_FREE;
+                worker->drain = (worker->drain + 1) % CHANNEL_SLOTS;
                 worker_signal(worker);
+                if (state != SLOT_CHUNK)
+                    break;
             }
-            state = worker->state;
-            result = worker->result;
             pool_unlock(pool);
-            if (state == JOB_SERIAL) {
+            if (state == SLOT_SERIAL) {
                 code = search_input(search, paths[i], in, err, &serial_buffer);
                 if (code < 0)
                     failed = 1;
@@ -368,17 +454,6 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
                 fputs("cgrep: output error\n", err);
                 goto joined_cleanup;
             }
-            next = i + jobs;
-            pool_lock(pool);
-            worker->used = 0;
-            if (next < count) {
-                worker->path = paths[next];
-                worker->state = JOB_ASSIGNED;
-            } else {
-                worker->state = JOB_IDLE;
-            }
-            worker_signal(worker);
-            pool_unlock(pool);
         }
     }
 joined_cleanup:
@@ -391,6 +466,7 @@ joined_cleanup:
         pthread_cond_destroy(&pool->workers[i].changed);
     pthread_mutex_destroy(&pool->mutex);
     cu_arena_release(&serial_arena);
+    free(pool->workers);
     free(pool);
     if (fflush(out) != 0 || ferror(out))
         failed = 1;

@@ -12,6 +12,26 @@ int cgrep_fuzz_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #include "../src/cgrep.c"
 #undef cgrep_main
 
+/* A fresh filter per call. */
+static size_t find(CuStr hay, size_t start, const Literal *literal)
+{
+    Finder f;
+
+    finder_init(&f, literal);
+    return find_with(hay, start, literal, &f);
+}
+
+/* Unfiltered KMP from start; the oracle for the linear fallback. */
+static size_t find_linear(CuStr hay, size_t start, const Literal *literal)
+{
+    size_t state;
+    size_t end;
+
+    state = 0;
+    end = find_end(hay, start, literal, &state);
+    return end == NO_MATCH ? NO_MATCH : end - literal->text.len;
+}
+
 static size_t naive(CuStr hay, size_t start, CuStr needle)
 {
     size_t i;
@@ -35,6 +55,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     CuArena a;
     Literal literal;
+    Finder finder;
+    size_t at;
     CuStr hay;
     CuStr needle;
     size_t n;
@@ -56,6 +78,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     assert(find(hay, start, &literal) == expected);
     if (needle.len >= 2)
         assert(find_linear(hay, start, &literal) == expected);
+    /* One filter kept across every match, as search_text keeps it. */
+    if (needle.len != 0) {
+        finder_init(&finder, &literal);
+        at = 0;
+        while ((expected = naive(hay, at, needle)) != NO_MATCH) {
+            assert(find_with(hay, at, &literal, &finder) == expected);
+            at = expected + 1;
+        }
+        assert(find_with(hay, at, &literal, &finder) == NO_MATCH);
+    }
     cut = data[1] % (hay.len + 1);
     state = 0;
     found = contains_chunk(&literal, cu_str_n(hay.ptr, cut), &state);

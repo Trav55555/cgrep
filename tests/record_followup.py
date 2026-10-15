@@ -1,18 +1,17 @@
 """Combine retained performance samples with validated acceptance/source identity."""
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+from record_support import digest, read_receipts
+
 SOURCES = ["src/cgrep.c", "src/parallel.inc", "cmd/main.c", "semantics/sem_find.c"]
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():
@@ -31,11 +30,7 @@ def main():
     if any(marker not in log for marker in required) or log.count("difftest: 3000/3000 cases identical") != 4:
         raise RuntimeError("acceptance log incomplete")
     receipt = Path(re.search(r"^Acceptance receipts: (.*)$", log, re.M).group(1))
-    receipts = {}
-    for name, tier in [("c-utils", "gate"), ("cli", "fast"), ("cgrep", "deep")]:
-        path = receipt / (name + ".json")
-        subprocess.run(["python3", "-I", str(ROOT / "tests/check_receipt.py"), str(path), tier], check=True)
-        receipts[name] = json.loads(path.read_text())
+    receipts = read_receipts(ROOT, receipt)
     if "selftest: PASS" not in (args.acceptance / "toolchain-selftest.log").read_text():
         raise RuntimeError("missing toolchain selftest")
     binary = digest(stage / "build/cgrep")

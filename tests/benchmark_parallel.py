@@ -74,6 +74,26 @@ def commands(binary, pattern, paths, numbers, gnu_grep, baseline=None, cgrep_thr
     return result
 
 
+MIXED_WORDS = (b"alpha beta gamma delta error warning info debug kernel mutex session request "
+               b"handler buffer cache index token timeout retry value the of and to in is for "
+               b"connection established closed user admin config server client update").split()
+
+
+def mixed_text(size, seed=7):
+    """Deterministic varied log-like lines. Common bytes make false candidates."""
+    rng = random.Random(seed)
+    lines, used = [], 0
+    while True:
+        words = [rng.choice(MIXED_WORDS) for _ in range(rng.randint(5, 14))]
+        if rng.random() < 0.5:
+            words.insert(rng.randrange(len(words) + 1), str(rng.randrange(1000)).encode())
+        line = b" ".join(words) + b"\n"
+        if used + len(line) > size:
+            return b"".join(lines)
+        lines.append(line)
+        used += len(line)
+
+
 def make_case(root, name, count, per_file, line, pattern, tail, numbers):
     directory = root / name
     directory.mkdir()
@@ -115,6 +135,12 @@ def measure(binary, directory, paths, expected, pattern, repeats, rng, numbers, 
                 elapsed = time.perf_counter() - started
                 if sink.tell() != expected_length:
                     raise RuntimeError(f"{name}: timed output length mismatch")
+                # Validate every timed byte after stopping the wall timer.
+                # Same-length corruption must not pass between warm checks.
+                sink.seek(0)
+                validate_output(subprocess.CompletedProcess(variants[name], result.returncode,
+                                                            sink.read(), result.stderr),
+                                expected, paths, name.startswith("rg-"))
             after = resource.getrusage(resource.RUSAGE_CHILDREN)
             if result.returncode != status or result.stderr:
                 raise RuntimeError(f"{name}: timed search failed: {result!r}")
@@ -136,6 +162,7 @@ def measure(binary, directory, paths, expected, pattern, repeats, rng, numbers, 
     medians = {name: statistics.median(values) for name, values in samples.items()}
     return {"seconds": medians, "samples": samples,
             "cpu_seconds": {name: statistics.median(values) for name, values in cpu.items()},
+            "cpu_samples": cpu,
             "peak_rss_kib": rss,
             "rg_speedup_vs_j1": {name: medians["rg-j1"] / medians[name]
                                  for name in variants if name.startswith("rg-")},
@@ -176,6 +203,14 @@ def main():
         ("small-absent", args.small_files, 16384, ordinary, "NEEDLE42", b""),
         ("small-late-match", args.small_files, 16384, ordinary, "NEEDLE42", b"NEEDLE42\n"),
         ("matching-output-heavy", args.medium_files, 524288, ordinary, "alpha", b""),
+    ]
+    # Varied text reaches candidate rejection, which the uniform line above
+    # never does. Each block is generated once and fills its file.
+    medium = total // args.medium_files
+    specs += [
+        ("mixed-heavy", args.medium_files, medium, mixed_text(medium), "error", b""),
+        ("mixed-common-anchor", args.medium_files, medium, mixed_text(medium), "e 5", b""),
+        ("mixed-rare-absent", 1, total, mixed_text(total), "zebrafish", b""),
     ]
     if args.case:
         unknown = set(args.case) - {case[0] for case in specs}

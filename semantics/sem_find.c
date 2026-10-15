@@ -78,6 +78,7 @@ static void targeted_paths(void)
         "abababababababababababababababababababababababababababababababababba";
     CuArena arena;
     Literal literal;
+    Finder finder;
     CuStr hay;
     size_t expected;
 
@@ -91,10 +92,13 @@ static void targeted_paths(void)
     hay = cu_str_n(hot, sizeof hot - 1);
     expected = naive(hay, 0, literal.text);
     assert(expected == sizeof hot - 5);
+    /* Hot filter bytes trip the work budget, the learned switch stays hot,
+     * and a bounded KMP window finds the match. */
     confirmations = 0;
     kmp_bytes = 0;
-    assert(find(hay, 0, &literal) == expected);
-    assert(confirmations == 16 && kmp_bytes != 0);
+    finder_init(&finder, &literal);
+    assert(find_with(hay, 0, &literal, &finder) == expected);
+    assert(finder.switched && confirmations != 0 && kmp_bytes != 0);
     assert(find(hay, expected, &literal) == expected);
     assert(find(hay, expected + 1, &literal) == NO_MATCH);
     cu_arena_release(&arena);
@@ -130,6 +134,18 @@ static void word_count_corner(void)
     assert(count_lines(cu_str_n(bytes, sizeof bytes), 0, sizeof bytes) == expected);
     memset(bytes, '\n', sizeof bytes);
     assert(count_lines(cu_str_n(bytes, sizeof bytes), 0, sizeof bytes) == (unsigned long)sizeof bytes);
+    memset(bytes, 'x', sizeof bytes);
+    memset(bytes, '\n', 4);
+    for (i = 4; i < sizeof bytes; i++) {
+        if ((i - 4) % sizeof(unsigned long) < ((i - 4) / sizeof(unsigned long)) % 4)
+            bytes[i] = '\n';
+    }
+    expected = 0;
+    for (i = 0; i < sizeof bytes; i++) {
+        if (bytes[i] == '\n')
+            expected++;
+    }
+    assert(count_lines(cu_str_n(bytes, sizeof bytes), 0, sizeof bytes) == expected);
     memset(bytes, 'a', sizeof bytes);
     for (i = 31; i < sizeof bytes; i += 32)
         bytes[i] = '\n';

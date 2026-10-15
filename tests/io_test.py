@@ -86,11 +86,11 @@ def main():
             raise RuntimeError(f'line limit or continued search failed: {result!r}')
         print('PASS line limit: status 2, later input still searched')
         result = subprocess.run([binary, 'alpha', 'long', 'match'], cwd=root,
-                                capture_output=True, timeout=10, preexec_fn=memory_limit(12))
+                                capture_output=True, timeout=10, preexec_fn=memory_limit(10))
         if result.returncode != 2 or result.stdout != b'match:alpha\n' or b'out of memory' not in result.stderr:
             raise RuntimeError(f'allocation refusal or buffer recovery failed: {result!r}')
         print('PASS allocation refusal: failed buffer discarded, later input still searched')
-        for limit, reason in [(32, b'line exceeds 8 MiB'), (12, b'out of memory')]:
+        for limit, reason in [(32, b'line exceeds 8 MiB'), (10, b'out of memory')]:
             result = subprocess.run([binary, '-j8', 'alpha', 'long', 'match'], cwd=root,
                                     capture_output=True, timeout=10, preexec_fn=memory_limit(limit))
             if result.returncode != 2 or result.stdout != b'match:alpha\n' or reason not in result.stderr:

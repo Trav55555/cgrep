@@ -107,6 +107,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     searcher.out = sink;
     searcher.write = NULL;
     searcher.cancelled = NULL;
+    searcher.finder = NULL;
     searcher.context = NULL;
     cu_input_attach(&in, stdin);
     result = search_stream(&searcher, "input", &in, &buffer);

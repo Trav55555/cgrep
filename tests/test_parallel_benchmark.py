@@ -3,6 +3,9 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
+import random
+import tempfile
 
 spec = importlib.util.spec_from_file_location("parallel_benchmark", Path(__file__).with_name("benchmark_parallel.py"))
 benchmark = importlib.util.module_from_spec(spec)
@@ -49,6 +52,20 @@ class OutputTests(unittest.TestCase):
     def test_reference_without_numbers(self):
         actual = benchmark.reference_output("a", b"no\nx\nx", b"x", True, False)
         self.assertEqual(actual, b"a:x\na:x\n")
+
+    def test_timed_same_length_corruption(self):
+        def run(command, **kwargs):
+            correct = b"a:1:x\na:2:x\nb:1:x\n"
+            if "stdout" in kwargs:
+                kwargs["stdout"].write(correct.replace(b"x", b"y"))
+                return subprocess.CompletedProcess(command, 0, None, b"")
+            return subprocess.CompletedProcess(command, 0, correct, b"")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(benchmark, "commands", return_value={"cgrep": ["fixture"]}), patch.object(benchmark.subprocess, "run", side_effect=run):
+                with self.assertRaisesRegex(RuntimeError, "exact output"):
+                    benchmark.measure("fixture", directory, self.paths, self.expected, "x", 1,
+                                      random.Random(0), True, "grep", "C")
 
     def test_cgrep_worker_sweep(self):
         variants = benchmark.commands("cgrep", "-needle", ["a", "b"], True, "/usr/bin/grep", cgrep_threads=True)

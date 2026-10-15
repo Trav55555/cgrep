@@ -20,8 +20,8 @@
  * observed output failures stop serial input or cancel prefetched workers.
  * Explicit -j1 through -j8 preserve argv-order output; default is serial.
  * Linux/glibc >= 2.34 regular-file workers have private input windows and
- * bounded 64 KiB output channels. Other targets and stdin/nonregular inputs
- * stay serial. Every started worker is joined before returning; a regular
+ * two bounded 1 MiB output slots each. Other targets, stdin and nonregular
+ * inputs stay serial. Every started worker is joined before returning; a regular
  * file read may delay cancellation. POSIX SIGPIPE may terminate the CLI
  * instead of returning 2. Earlier output is not rolled back.
  */

@@ -8,6 +8,10 @@
 #include "cgrep.h"
 
 int cgrep_count_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
+/* test_count_simd.c reuses this suite with the native SSE2 counter. */
+#ifndef CGREP_COUNT_SIMD
+#define CGREP_NO_SIMD 1
+#endif
 #define cgrep_main cgrep_count_probe
 #include "../src/cgrep.c"
 #undef cgrep_main
@@ -27,7 +31,11 @@ static unsigned long byte_count(const char *p, size_t n)
 
 static void test_boundaries(void)
 {
-    static const size_t lengths[] = {0, 1, 3, 4, 7, 8, 9, 31, 255, 256, 257, 259, 260, 511, 513, 1025};
+    static const size_t lengths[] = {
+        0, 1, 3, 4, 7, 8, 9, 31, 32, 33, 127, 128, 129,
+        255, 256, 257, 259, 260, 511, 513,
+        1023, 1024, 1025, 1027, 1028, 1029, 1033, 2049
+    };
     static const unsigned char bytes[] = {'\n', '\v', '\v', '\n', 255, 128, 0, '\n'};
     char *storage;
     size_t k;
@@ -90,6 +98,25 @@ static void test_density_changes(void)
     assert(count_lines(cu_str_n(storage, sizeof storage), 0, sizeof storage) == 5);
 }
 
+static void test_asymmetric_words(void)
+{
+    char *storage;
+    size_t size;
+    size_t i;
+
+    size = 4 + 16 * sizeof(unsigned long) + 3;
+    storage = (char *)malloc(size);
+    assert(storage != NULL);
+    memset(storage, 'x', size);
+    memset(storage, '\n', 4);
+    for (i = 0; i < 16 * sizeof(unsigned long); i++) {
+        if (i % sizeof(unsigned long) < (i / sizeof(unsigned long)) % 4)
+            storage[4 + i] = '\n';
+    }
+    assert(count_lines(cu_str_n(storage, size), 0, size) == byte_count(storage, size));
+    free(storage);
+}
+
 static void test_number_prefix(void)
 {
     static const unsigned long values[] = {0, 1, 9, 10, 99, 100, 999, 1000, ULONG_MAX / 10, ULONG_MAX};
@@ -117,5 +144,6 @@ int main(void)
     test_boundaries();
     test_byte_values();
     test_density_changes();
+    test_asymmetric_words();
     return 0;
 }

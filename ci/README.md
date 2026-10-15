@@ -53,11 +53,52 @@ commit signatures or the identity of the Gitea operator.
 
 ## Inspect a run
 
-CI streams checks into the job log and retains scratch directories under
-`$RUNNER_TEMP/cgrep-acceptance.*`. The script prints the scratch path first. It
-contains `toolchain-selftest.log`, `acceptance.log`, pinned sibling sources,
-and `cgrep/build/verify.*/` JSON receipts. A required PASS means both the
-process and receipt checks succeeded. Optional authority, regions, absent
+CI streams checks into the job log. Its temporary scratch directory contains
+logs, pinned source, and JSON receipts while the job runs. The runner removes
+that directory after completion; run 330 confirmed this cleanup behavior.
+Do not rely on the printed scratch path for post-run evidence.
+
+The EXIT handler copies only `toolchain-selftest.log`, `acceptance.log`,
+`c-utils.json`, `cli.json`, `cgrep.json`, and a hash/status manifest to
+`ci-artifacts/`. It marks incomplete failures with their original exit code.
+A successful run missing required evidence fails collection. The collector
+never copies source trees, home directories, tea configuration, or runner
+credential files. Logs and receipts come only from trusted checks.
+The upload step pins v3.1.3 with its node16 action descriptor and legacy
+artifact protocol, rather than assuming the installed runner supports
+node24 or the v4 protocol. It runs on success or ordinary failure, errors on
+missing files, and requests 30-day retention. A runner kill or exhausted job
+timeout can prevent collection/upload; server job logs remain the fallback. Download the `acceptance-SHA-RUN_ID` artifact
+from the Gitea job. Live upload remains unverified until this workflow revision
+is published and exercised against Gitea; local collection/sensitivity checks
+are not an upload claim.
+
+After extracting a downloaded artifact into a fresh directory, check the
+directory that contains `metadata.json`:
+
+```sh
+python3 -I ci/check_artifacts.py /path/to/extracted-bundle
+# A successful bundle must also satisfy the current required receipt policy:
+python3 -I ci/check_artifacts.py /path/to/extracted-bundle --receipts
+```
+
+The first command verifies the exact inventory, sizes, hashes, and recorded
+status. It can succeed for a valid failure bundle and prints that failure's
+exit code. `--receipts` refuses failed acceptance and checks the dependency,
+CLI, and deep receipts. Both commands reject symlinks, unlisted files, missing
+successful evidence, and inconsistent status. Hashes check contents, not the
+uploader's identity or the truth of a forged manifest.
+
+The latest local pilot used real count/filename acceptance receipts with a
+retained selftest log from the unchanged pinned toolchain. It exercised the
+actual EXIT collector, successful collection, seeded failure preservation,
+and local ZIP retrieval after disposable job cleanup. This is explicitly a
+composite local pilot, not a fresh CI wrapper run or live Gitea retrieval.
+Its sources and results are retained in
+`../docs/qualification-artifacts.json`. Quiet benchmark admission still failed;
+no qualification timings started.
+
+A required PASS means both the process and receipt checks succeeded. Optional authority, regions, absent
 CBMC proofs, and tcc exclusions remain explicit. Semantics is bounded and
 does not interpret pthreads.
 
@@ -68,7 +109,9 @@ mkdir -p /tmp/cgrep-ci-pilot
 RUNNER_TEMP=/tmp/cgrep-ci-pilot bash ci/verify.sh
 ```
 
-Use the provisioned runner environment. Never run a second heavy acceptance
-check alongside it. Check `systemctl --user status act_runner-cgrep.service`
+Use a fresh checkout and the provisioned runner environment. Local pilots
+leave `ci-artifacts/` for inspection; another run refuses that existing path
+rather than overwriting evidence. Never run a second heavy acceptance check
+alongside it. Check `systemctl --user status act_runner-cgrep.service`
 for runner health. The service being active does not prove a workflow ran;
 verify the Gitea job log and the acceptance receipts after publishing.

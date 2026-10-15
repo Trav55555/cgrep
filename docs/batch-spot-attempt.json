@@ -1,0 +1,1068 @@
+{
+  "schema": "cgrep.batch-spot-attempt/0",
+  "recorded_utc": "2026-10-14T17:27:11.793221+00:00",
+  "status": "blocked: no same-type Spot capacity; candidate performance unqualified",
+  "qualification_started": false,
+  "instances_launched": 0,
+  "timed_qualification_invocations": 0,
+  "on_demand_fallback": false,
+  "max_bid_usd_per_hour": 0.2,
+  "guest_deadline_minutes": 45,
+  "prearmed_local_cleanup_minutes": 60,
+  "attempts": [
+    {
+      "work": "/tmp/cgrep-batch-spot.hluQhjaA",
+      "state": {
+        "experiment": "cgrep-batch-spot-hluQhjaA",
+        "region": "us-east-1",
+        "instance_type": "c7i.2xlarge",
+        "az": "us-east-1d",
+        "spot_max_hourly_usd": 0.2,
+        "deadline_minutes": 45,
+        "fallback_cleanup_minutes": 60,
+        "conservative_max_usd": 0.22,
+        "resources": {
+          "security_group": "sg-04e571849a7fc8ead",
+          "bucket": "pi-cgrep-spot-526119720158-hluqhjaa"
+        },
+        "commands": {},
+        "authorization": "User agreed, proceed with candidate qualification after explicit fresh Spot approval requirement; same prior bid/runtime/cleanup bounds",
+        "payload_sha256": "d95aa72f549e01ace060cf5108db665450beb792a1da1d6b82a103017d78f8c5",
+        "inputs_sha256": {
+          "remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+          "remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+          "tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+          "tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+          "tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+          "tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+          "bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+          "bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+          "bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+          "bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+          "bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228"
+        },
+        "latest_quoted_hourly_usd": 0.1764,
+        "fallback_timer": "cgrep-batch-expiry-hluQhjaA",
+        "started_utc": "2026-10-14T17:20:50.331293+00:00",
+        "bucket_deleted": true,
+        "security_group_deleted": true,
+        "cleanup_errors": [],
+        "cleanup_complete": true
+      },
+      "cleanup": {
+        "checked_utc": "2026-10-14T17:30:22.120987+00:00",
+        "account": "526119720158",
+        "region": "us-east-1",
+        "profile": "trav-root",
+        "instance_filters": [
+          {
+            "Name": "tag:Experiment",
+            "Values": [
+              "cgrep-batch-spot-hluQhjaA"
+            ]
+          },
+          {
+            "Name": "tag:Owner",
+            "Values": [
+              "trav"
+            ]
+          }
+        ],
+        "bucket_id": "pi-cgrep-spot-526119720158-hluqhjaa",
+        "security_group_id": "sg-04e571849a7fc8ead",
+        "verifier_sha256": "3790c43e87039d33920623ad13f4f2de49fe7447eeb25b636a2e3b60ce0ec45a",
+        "instances": [],
+        "bucket": "404",
+        "security_group": "InvalidGroup.NotFound",
+        "timer_command": [
+          "systemctl",
+          "--user",
+          "show",
+          "cgrep-batch-expiry-hluQhjaA.timer",
+          "-p",
+          "LoadState",
+          "-p",
+          "ActiveState"
+        ],
+        "timer": "LoadState=not-found\nActiveState=inactive\n"
+      },
+      "provision_failure": "Running timer as unit: cgrep-batch-expiry-hluQhjaA.timer\nWill run service as unit: cgrep-batch-expiry-hluQhjaA.service\nCleaned task resources; already absent resources tolerated\nTraceback (most recent call last):\n  File \"/tmp/cgrep-batch-spot.hluQhjaA/cloud.py\", line 287, in <module>\n    globals()[action]()\n  File \"/tmp/cgrep-batch-spot.hluQhjaA/cloud.py\", line 201, in provision\n    response = base.EC2.run_instances(ImageId='ami-0fa5967347d08d2df', InstanceType='c7i.2xlarge',\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\nbotocore.exceptions.ClientError: An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 4): There is no Spot capacity available that matches your request.\n",
+      "harness_controls": "PASS execution timeout and validation failure retain partial bytes/status/raw measurement\nFINAL_UPLOAD_FAILED 7\nFINAL_UPLOAD_FAILED 7\nPASS final-upload failure cannot turn benchmark success into overall success or erase failure\nPASS generated shell/Python upload scripts parse, bounded transfer, no guest package install\nCleaned task resources; already absent resources tolerated\nCleaned task resources; already absent resources tolerated\nPASS cleanup recovers tagged instance and succeeds repeatedly with already absent bucket/group\nPASS failed discovery retains failure while known-ID termination and independent cleanup proceed\nPASS emergency recovers immutable task identity from corrupt state; normal action fails closed; atomic save\nPASS fallback armed before cloud allocation, Spot-only request, launch failure cleanup\nPASS harness controls; structural SDK fakes do not prove live AWS behavior\n"
+    },
+    {
+      "work": "/tmp/cgrep-batch-spot2.yefuf71i",
+      "state": {
+        "experiment": "cgrep-batch-spot-yefuf71i",
+        "region": "us-east-1",
+        "instance_type": "c7i.2xlarge",
+        "az": "us-east-1b",
+        "spot_max_hourly_usd": 0.2,
+        "deadline_minutes": 45,
+        "fallback_cleanup_minutes": 60,
+        "conservative_max_usd": 0.22,
+        "resources": {
+          "security_group": "sg-0c0860980162497ed",
+          "bucket": "pi-cgrep-spot-526119720158-yefuf71i"
+        },
+        "commands": {},
+        "fallback_timer": "cgrep-batch-expiry-yefuf71i",
+        "authorization": "User agreed, proceed with candidate qualification after explicit fresh Spot approval requirement; same prior bid/runtime/cleanup bounds",
+        "payload_sha256": "225f5c6e92dc2e09d018f74c007d30ada250961a1a6b10c093d21ed890c22c38",
+        "inputs_sha256": {
+          "remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+          "remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+          "tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+          "tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+          "tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+          "tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+          "bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+          "bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+          "bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+          "bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+          "bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228"
+        },
+        "latest_quoted_hourly_usd": 0.1824,
+        "started_utc": "2026-10-14T17:22:50.282478+00:00",
+        "bucket_deleted": true,
+        "security_group_deleted": true,
+        "cleanup_errors": [],
+        "cleanup_complete": true
+      },
+      "cleanup": {
+        "checked_utc": "2026-10-14T17:30:22.624420+00:00",
+        "account": "526119720158",
+        "region": "us-east-1",
+        "profile": "trav-root",
+        "instance_filters": [
+          {
+            "Name": "tag:Experiment",
+            "Values": [
+              "cgrep-batch-spot-yefuf71i"
+            ]
+          },
+          {
+            "Name": "tag:Owner",
+            "Values": [
+              "trav"
+            ]
+          }
+        ],
+        "bucket_id": "pi-cgrep-spot-526119720158-yefuf71i",
+        "security_group_id": "sg-0c0860980162497ed",
+        "verifier_sha256": "3790c43e87039d33920623ad13f4f2de49fe7447eeb25b636a2e3b60ce0ec45a",
+        "instances": [],
+        "bucket": "404",
+        "security_group": "InvalidGroup.NotFound",
+        "timer_command": [
+          "systemctl",
+          "--user",
+          "show",
+          "cgrep-batch-expiry-yefuf71i.timer",
+          "-p",
+          "LoadState",
+          "-p",
+          "ActiveState"
+        ],
+        "timer": "LoadState=not-found\nActiveState=inactive\n"
+      },
+      "provision_failure": "Running timer as unit: cgrep-batch-expiry-yefuf71i.timer\nWill run service as unit: cgrep-batch-expiry-yefuf71i.service\nCleaned task resources; already absent resources tolerated\nTraceback (most recent call last):\n  File \"/tmp/cgrep-batch-spot2.yefuf71i/cloud.py\", line 287, in <module>\n    globals()[action]()\n  File \"/tmp/cgrep-batch-spot2.yefuf71i/cloud.py\", line 201, in provision\n    response = base.EC2.run_instances(ImageId='ami-0fa5967347d08d2df', InstanceType='c7i.2xlarge',\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\nbotocore.exceptions.ClientError: An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 4): There is no Spot capacity available that matches your request.\n",
+      "harness_controls": "PASS execution timeout and validation failure retain partial bytes/status/raw measurement\nFINAL_UPLOAD_FAILED 7\nFINAL_UPLOAD_FAILED 7\nPASS final-upload failure cannot turn benchmark success into overall success or erase failure\nPASS generated shell/Python upload scripts parse, bounded transfer, no guest package install\nCleaned task resources; already absent resources tolerated\nCleaned task resources; already absent resources tolerated\nPASS cleanup recovers tagged instance and succeeds repeatedly with already absent bucket/group\nPASS failed discovery retains failure while known-ID termination and independent cleanup proceed\nPASS emergency recovers immutable task identity from corrupt state; normal action fails closed; atomic save\nPASS fallback armed before cloud allocation, Spot-only request, launch failure cleanup\nPASS harness controls; structural SDK fakes do not prove live AWS behavior\n"
+    },
+    {
+      "work": "/tmp/cgrep-batch-spot3.hl5s_uri",
+      "state": {
+        "experiment": "cgrep-batch-spot-hl5s_uri",
+        "region": "us-east-1",
+        "instance_type": "c7i.2xlarge",
+        "az": "us-east-1a",
+        "spot_max_hourly_usd": 0.2,
+        "deadline_minutes": 45,
+        "fallback_cleanup_minutes": 60,
+        "conservative_max_usd": 0.22,
+        "resources": {
+          "security_group": "sg-0be63c73a517e7c35",
+          "bucket": "pi-cgrep-spot-526119720158-hl5s-uri"
+        },
+        "commands": {},
+        "fallback_timer": "cgrep-batch-expiry-hl5s_uri",
+        "authorization": "User agreed, proceed with candidate qualification after explicit fresh Spot approval requirement; same prior bid/runtime/cleanup bounds",
+        "payload_sha256": "fc5021d543c4675e38b906828e9f73965fe238cc0c7efeadf1717074223d93b6",
+        "inputs_sha256": {
+          "remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+          "remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+          "tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+          "tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+          "tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+          "tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+          "bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+          "bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+          "bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+          "bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+          "bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228"
+        },
+        "latest_quoted_hourly_usd": 0.1976,
+        "started_utc": "2026-10-14T17:24:44.166057+00:00",
+        "bucket_deleted": true,
+        "security_group_deleted": true,
+        "cleanup_errors": [],
+        "cleanup_complete": true
+      },
+      "cleanup": {
+        "checked_utc": "2026-10-14T17:30:23.067842+00:00",
+        "account": "526119720158",
+        "region": "us-east-1",
+        "profile": "trav-root",
+        "instance_filters": [
+          {
+            "Name": "tag:Experiment",
+            "Values": [
+              "cgrep-batch-spot-hl5s_uri"
+            ]
+          },
+          {
+            "Name": "tag:Owner",
+            "Values": [
+              "trav"
+            ]
+          }
+        ],
+        "bucket_id": "pi-cgrep-spot-526119720158-hl5s-uri",
+        "security_group_id": "sg-0be63c73a517e7c35",
+        "verifier_sha256": "3790c43e87039d33920623ad13f4f2de49fe7447eeb25b636a2e3b60ce0ec45a",
+        "instances": [],
+        "bucket": "404",
+        "security_group": "InvalidGroup.NotFound",
+        "timer_command": [
+          "systemctl",
+          "--user",
+          "show",
+          "cgrep-batch-expiry-hl5s_uri.timer",
+          "-p",
+          "LoadState",
+          "-p",
+          "ActiveState"
+        ],
+        "timer": "LoadState=not-found\nActiveState=inactive\n"
+      },
+      "provision_failure": "Running timer as unit: cgrep-batch-expiry-hl5s_uri.timer\nWill run service as unit: cgrep-batch-expiry-hl5s_uri.service\nCleaned task resources; already absent resources tolerated\nTraceback (most recent call last):\n  File \"/tmp/cgrep-batch-spot3.hl5s_uri/cloud.py\", line 287, in <module>\n    globals()[action]()\n  File \"/tmp/cgrep-batch-spot3.hl5s_uri/cloud.py\", line 201, in provision\n    response = base.EC2.run_instances(ImageId='ami-0fa5967347d08d2df', InstanceType='c7i.2xlarge',\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/travers/projects/porygon-ai/porygon-ai/.venv/lib/python3.12/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\nbotocore.exceptions.ClientError: An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 4): There is no Spot capacity available that matches your request.\n",
+      "harness_controls": "PASS execution timeout and validation failure retain partial bytes/status/raw measurement\nFINAL_UPLOAD_FAILED 7\nFINAL_UPLOAD_FAILED 7\nPASS final-upload failure cannot turn benchmark success into overall success or erase failure\nPASS generated shell/Python upload scripts parse, bounded transfer, no guest package install\nCleaned task resources; already absent resources tolerated\nCleaned task resources; already absent resources tolerated\nPASS cleanup recovers tagged instance and succeeds repeatedly with already absent bucket/group\nPASS failed discovery retains failure while known-ID termination and independent cleanup proceed\nPASS emergency recovers immutable task identity from corrupt state; normal action fails closed; atomic save\nPASS fallback armed before cloud allocation, Spot-only request, launch failure cleanup\nPASS harness controls; structural SDK fakes do not prove live AWS behavior\n"
+    }
+  ],
+  "artifacts": "/home/travers/projects/cgrep/build/batch-spot-attempt-20261014",
+  "artifact_sha256": {
+    "cgrep-batch-spot.hluQhjaA/alternative-zones.json": "266fe97bb9261279a661a20e805e0b93a9a277682f59bd05c60c392302b75ad1",
+    "cgrep-batch-spot.hluQhjaA/base_cloud.py": "4f0daf23e20304021b9d48addb7d221a7490138381ed6455218f0e1ebd7326e9",
+    "cgrep-batch-spot.hluQhjaA/cleanup-recheck.log": "268bbbd95b191c051d805f74d99793603e82d5ff8be08ad11b1bd779448bde79",
+    "cgrep-batch-spot.hluQhjaA/cleanup-verification.json": "07e7d26b48b25f83c17249187e4104e6ba63ecffcb24fc108739589a178fda4f",
+    "cgrep-batch-spot.hluQhjaA/cloud-state.json": "fe4034954f4685757cf38fa23e23286770e2a8470150572f41c5966051459f53",
+    "cgrep-batch-spot.hluQhjaA/cloud.py": "e8326e4b72f45ace012bdcfad69e15acd50e4731e2bae992362bc18cdd25c601",
+    "cgrep-batch-spot.hluQhjaA/decisions.tsv": "6ebcf51ee27ddca41aff9dd62103d73e043920dde2bf66753439703287790dd9",
+    "cgrep-batch-spot.hluQhjaA/fallback-armed.log": "58f2aea655a306c8ebbb04983ed38a2df6a592197cb1d53b6012900bd3298fb7",
+    "cgrep-batch-spot.hluQhjaA/harness-controls-final.log": "97a84ac365796bdbfda822b0a581b675e02f73d021d8e69e5fccfd045493d32b",
+    "cgrep-batch-spot.hluQhjaA/harness-controls-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot.hluQhjaA/harness-controls.log": "3fc729fa37c0933825badec3853012dbc937b0f80b954be9ad1f0d2d2d327fb2",
+    "cgrep-batch-spot.hluQhjaA/harness_controls.py": "1dabb8d3fe754e52c060106113cb3341cd9120464462cb29b262bce9f387d0e5",
+    "cgrep-batch-spot.hluQhjaA/local-smoke-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot.hluQhjaA/local-smoke.log": "38515a27ee43581cf64f1382c6487a5d456ccc8cfa493137d80008ae074ae506",
+    "cgrep-batch-spot.hluQhjaA/payload/bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+    "cgrep-batch-spot.hluQhjaA/payload/bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+    "cgrep-batch-spot.hluQhjaA/payload/bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+    "cgrep-batch-spot.hluQhjaA/payload/bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+    "cgrep-batch-spot.hluQhjaA/payload/bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "cgrep-batch-spot.hluQhjaA/payload/remote_bench.py": "26918308e80bc51da255abdff924bb21b1da75bc5e0555a6a93c0706e5424a40",
+    "cgrep-batch-spot.hluQhjaA/payload/remote_driver.py": "0286b876469bb377fdf972cf602f98f9ffdf0264bda8f2722571a30b0eb5bb52",
+    "cgrep-batch-spot.hluQhjaA/payload/results/paired.json": "375c70722a57b87fa1dcb853169cd32ea87b5cbc5859e901e4aff67383fb2774",
+    "cgrep-batch-spot.hluQhjaA/payload/results/samples.jsonl": "2294930ab5c9adb618024bea6226ccbefa01b26eec0e11a3756f0d8f7233a0c3",
+    "cgrep-batch-spot.hluQhjaA/payload/sha256.json": "dc8db17e0844c5d56fe14d82f49d5aa7f0365350c0848c5788b417c23f28c3ed",
+    "cgrep-batch-spot.hluQhjaA/payload/tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+    "cgrep-batch-spot.hluQhjaA/payload/tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+    "cgrep-batch-spot.hluQhjaA/payload/tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+    "cgrep-batch-spot.hluQhjaA/payload/tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+    "cgrep-batch-spot.hluQhjaA/payload/upload.sh": "c87c7a722d59a266b300850637a1cb77b46cc67c5add8a66aa9e79e198955808",
+    "cgrep-batch-spot.hluQhjaA/payload-pre-review.tar.gz": "728abbc594c505a9d1b949439aa879aa401130030d1ead9f39464bb253b27d1e",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/results/paired.json": "89041faa32e11a81cf4d518ef284cb820017571e0ae2be3deda15b600be6ab82",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/results/samples.jsonl": "404615cb19c3f31151d1d153696ca932f6ce0d75001480c1706d48471ed8ca2f",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/sha256.json": "edb90bd5ce90a27ecbfd46765fa84a8a1c0845e69d4449257b876fdc1efd7460",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+    "cgrep-batch-spot.hluQhjaA/payload-reviewed/upload.sh": "c87c7a722d59a266b300850637a1cb77b46cc67c5add8a66aa9e79e198955808",
+    "cgrep-batch-spot.hluQhjaA/payload.tar.gz": "d95aa72f549e01ace060cf5108db665450beb792a1da1d6b82a103017d78f8c5",
+    "cgrep-batch-spot.hluQhjaA/preflight-final.log": "a7c41d0f9123f2521e026d567dc316cc7f67aa8a4c2a98bf3e39b2ff2410ed24",
+    "cgrep-batch-spot.hluQhjaA/preflight-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot.hluQhjaA/preflight.json": "db446f37eb4158d8644d0b5a7d9272146776cf83e300c61950cc5bd635612cd3",
+    "cgrep-batch-spot.hluQhjaA/preflight.log": "a7c41d0f9123f2521e026d567dc316cc7f67aa8a4c2a98bf3e39b2ff2410ed24",
+    "cgrep-batch-spot.hluQhjaA/provision.log": "d3028e29a85412420d708a43508e239b68ab46786e6a546e76e10abf21cca6dc",
+    "cgrep-batch-spot.hluQhjaA/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot.hluQhjaA/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+    "cgrep-batch-spot.hluQhjaA/retention-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot.hluQhjaA/retention.log": "fe796eb17df381c45dda6edc69429dc72e78ee9bbd33c790eb2d35d8640b1c5f",
+    "cgrep-batch-spot.hluQhjaA/reviewed-smoke-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot.hluQhjaA/reviewed-smoke.log": "388b10c4b255ed21bf8f60abc99a1e8ac2eec8c9ee39473a4e9ee59dc0586f24",
+    "cgrep-batch-spot.hluQhjaA/verify_cleanup.py": "3790c43e87039d33920623ad13f4f2de49fe7447eeb25b636a2e3b60ce0ec45a",
+    "cgrep-batch-spot2.yefuf71i/base_cloud.py": "4f0daf23e20304021b9d48addb7d221a7490138381ed6455218f0e1ebd7326e9",
+    "cgrep-batch-spot2.yefuf71i/cleanup-verification.json": "2f0e56e0ba46f7ec6a9c6b021cfcc57339be657001f9b8433be824ffa1b9a3f3",
+    "cgrep-batch-spot2.yefuf71i/cloud-state.json": "69587444d0c82195f7a1e57999097430b596a11a1a600155fc40d417d412cc5f",
+    "cgrep-batch-spot2.yefuf71i/cloud.py": "ac2a5dc93efd5d1025c4b3eed8000a9fe620d5d4cb230c34bddc6b54d596b843",
+    "cgrep-batch-spot2.yefuf71i/fallback-armed.log": "e310292cf4c26779849fe0c27077360d1970c0c3fac9d5b8e49c3363cd9b6768",
+    "cgrep-batch-spot2.yefuf71i/harness-controls-final.log": "97a84ac365796bdbfda822b0a581b675e02f73d021d8e69e5fccfd045493d32b",
+    "cgrep-batch-spot2.yefuf71i/harness-controls-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot2.yefuf71i/harness_controls.py": "1dabb8d3fe754e52c060106113cb3341cd9120464462cb29b262bce9f387d0e5",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/sha256.json": "edb90bd5ce90a27ecbfd46765fa84a8a1c0845e69d4449257b876fdc1efd7460",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+    "cgrep-batch-spot2.yefuf71i/payload-reviewed/tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+    "cgrep-batch-spot2.yefuf71i/payload.tar.gz": "225f5c6e92dc2e09d018f74c007d30ada250961a1a6b10c093d21ed890c22c38",
+    "cgrep-batch-spot2.yefuf71i/preflight.json": "0ceb1c7989f2567912183ec54af2c41607dd79c124a2f8794f89479f9bb39162",
+    "cgrep-batch-spot2.yefuf71i/preflight.log": "0ebf483f581f7235b81edea3ccad23483d4b07a5603eec85d3492299f2542c2e",
+    "cgrep-batch-spot2.yefuf71i/prior-attempt.txt": "ca677b63f8f39a5869faab31a64565eb8bc7a20c020f5f2a6390bdaa0478a4a7",
+    "cgrep-batch-spot2.yefuf71i/provision.log": "6e821f53e2d9e9e9582194c5e632fb3b935e10f798d0687de0211f0c6680ad00",
+    "cgrep-batch-spot2.yefuf71i/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot2.yefuf71i/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+    "cgrep-batch-spot3.hl5s_uri/base_cloud.py": "4f0daf23e20304021b9d48addb7d221a7490138381ed6455218f0e1ebd7326e9",
+    "cgrep-batch-spot3.hl5s_uri/cleanup-verification.json": "3069c369fcfdeecff53b07e380888a5edc13053e3fe8bbd9e7ac11194cb4ea8f",
+    "cgrep-batch-spot3.hl5s_uri/cloud-state.json": "33ec82d710d3700cbac3e950428618b066caaecff04a6499fdbeda937dbcd9d7",
+    "cgrep-batch-spot3.hl5s_uri/cloud.py": "ff6153d53cd1238f16d8aad986f6b492d906bf828993450d93519421b7e48bed",
+    "cgrep-batch-spot3.hl5s_uri/fallback-armed.log": "3ac4183fbd9387e7789b29cf2e8cb3df2f725de23e3f55df7b216926ba0b3eab",
+    "cgrep-batch-spot3.hl5s_uri/harness-controls-final.log": "97a84ac365796bdbfda822b0a581b675e02f73d021d8e69e5fccfd045493d32b",
+    "cgrep-batch-spot3.hl5s_uri/harness-controls-status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "cgrep-batch-spot3.hl5s_uri/harness_controls.py": "1dabb8d3fe754e52c060106113cb3341cd9120464462cb29b262bce9f387d0e5",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/bin/candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/bin/grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/bin/installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/bin/previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/bin/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/sha256.json": "edb90bd5ce90a27ecbfd46765fa84a8a1c0845e69d4449257b876fdc1efd7460",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/tests/benchmark_parallel.py": "bceb402ba3297e4b0042307d04cbfcc358385635b773be77a03c2e398801a53e",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/tests/benchmark_quiet.py": "72d45691f6e419c7d218ee16c3ca37bb3e5c3ff066faf642c3da64cfdf6ddeb3",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/tests/test_parallel_benchmark.py": "d15fe960a33c90eae0ef10ad6e287fa98b52ed0bd890752a430d4b47ae302ac7",
+    "cgrep-batch-spot3.hl5s_uri/payload-reviewed/tests/test_quiet_benchmark.py": "4a8044a66643e3e80edc82c764f101e8aa456bad89bf3ea4805e430c5363ec66",
+    "cgrep-batch-spot3.hl5s_uri/payload.tar.gz": "fc5021d543c4675e38b906828e9f73965fe238cc0c7efeadf1717074223d93b6",
+    "cgrep-batch-spot3.hl5s_uri/preflight.json": "f24571a54bb355b0ff23c6dd6b178d706f631a088e921b42f31857a5727c5a78",
+    "cgrep-batch-spot3.hl5s_uri/preflight.log": "5dd3fde5e246bf3c7273285fc48ea3cab4341ae2fb1abeb2f4e64fba9b31c85c",
+    "cgrep-batch-spot3.hl5s_uri/prior-attempt.txt": "d5a7d585d0f716911f0608544f9b1fd9f98246f0abc983e93dc99865a05d42c3",
+    "cgrep-batch-spot3.hl5s_uri/provision.log": "19ead2240f9c1cb817d2105092a1f33ac82c130835fae981afc6ec4a0a75ed36",
+    "cgrep-batch-spot3.hl5s_uri/remote_bench.py": "6ebaac0ed3daa53753dfc6ef4203a7810205de39f3f4641ace42b642acb8aad8",
+    "cgrep-batch-spot3.hl5s_uri/remote_driver.py": "1881cb1c5ceb10673f8ccb02cb17e105bd325011762c0163ff07f79e9294ad0d"
+  },
+  "smoke": {
+    "schema": "cgrep.batch-spot-paired/0",
+    "complete": true,
+    "repeats": 1,
+    "locale": "C",
+    "cache": "warm explicit files; tmpfs",
+    "output": "complete regular-file sink, not /dev/null",
+    "binary_sha256": {
+      "installed": "547021b9eb2c20697da6793bdcc4928058ffe709bbf0564f4fe39c5e71fe1228",
+      "previous": "0042aeb90ae90e944e263334bdbf9c0a9f8fac880bc92adf8274d12da5f323b3",
+      "candidate": "0e7c1cf2185f4ae2f578ccb02f9144cbfb104f2d28a1b8eab1bf6c3da80e57e5",
+      "rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "grep": "20a35a4c18f2fe9e6305c1cbf866b9c0fcc3f957132ae66028c99ec353bb0a80"
+    },
+    "cases": [
+      {
+        "name": "smoke",
+        "numbers": false,
+        "bytes": 2024,
+        "files": 2,
+        "input_sha256": "78e39d6c13900a748eb2127e655a185051b156ee37987836b1aef8df4c6108fa",
+        "output_bytes": 2904,
+        "commands": {
+          "cgrep": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "gnu-grep": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/grep",
+            "--color=never",
+            "-F",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j1": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j2": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j4": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j8": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-default": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ]
+        },
+        "samples": {
+          "cgrep": [
+            0.000693456968292594
+          ],
+          "gnu-grep": [
+            0.0017342459759674966
+          ],
+          "cgrep-j1": [
+            0.0006788610480725765
+          ],
+          "cgrep-j2": [
+            0.0007928140112198889
+          ],
+          "cgrep-j4": [
+            0.0006968440138734877
+          ],
+          "cgrep-j8": [
+            0.0008085030131042004
+          ],
+          "rg-j1": [
+            0.001503723964560777
+          ],
+          "rg-j2": [
+            0.00291375198867172
+          ],
+          "rg-j4": [
+            0.0038642120198346674
+          ],
+          "rg-j8": [
+            0.0032623049919493496
+          ],
+          "rg-default": [
+            0.003594116016756743
+          ],
+          "baseline": [
+            0.0005801760125905275
+          ],
+          "baseline-j1": [
+            0.000552334007807076
+          ],
+          "baseline-j2": [
+            0.0008341119973920286
+          ],
+          "baseline-j4": [
+            0.0006536529981531203
+          ],
+          "baseline-j8": [
+            0.0008242920157499611
+          ],
+          "installed": [
+            0.000600725004915148
+          ],
+          "installed-j1": [
+            0.0005666700308211148
+          ],
+          "installed-j2": [
+            0.000617356039583683
+          ],
+          "installed-j4": [
+            0.0007579589728266001
+          ],
+          "installed-j8": [
+            0.0008034429629333317
+          ]
+        },
+        "cpu_samples": {
+          "cgrep": [
+            0.0005719999999999961
+          ],
+          "gnu-grep": [
+            0.0006720000000000025
+          ],
+          "cgrep-j1": [
+            0.0005579999999999995
+          ],
+          "cgrep-j2": [
+            0.0008000000000000021
+          ],
+          "cgrep-j4": [
+            0.000611999999999998
+          ],
+          "cgrep-j8": [
+            0.0007619999999999988
+          ],
+          "rg-j1": [
+            0.0013789999999999983
+          ],
+          "rg-j2": [
+            0.002078
+          ],
+          "rg-j4": [
+            0.0023190000000000016
+          ],
+          "rg-j8": [
+            0.0032359999999999993
+          ],
+          "rg-default": [
+            0.004013000000000003
+          ],
+          "baseline": [
+            0.0004840000000000018
+          ],
+          "baseline-j1": [
+            0.0004709999999999992
+          ],
+          "baseline-j2": [
+            0.0008040000000000026
+          ],
+          "baseline-j4": [
+            0.0006229999999999986
+          ],
+          "baseline-j8": [
+            0.0006120000000000014
+          ],
+          "installed": [
+            0.0004890000000000033
+          ],
+          "installed-j1": [
+            0.0004590000000000011
+          ],
+          "installed-j2": [
+            0.0006030000000000028
+          ],
+          "installed-j4": [
+            0.000729999999999998
+          ],
+          "installed-j8": [
+            0.0007720000000000019
+          ]
+        },
+        "complete": true
+      },
+      {
+        "name": "smoke",
+        "numbers": true,
+        "bytes": 2024,
+        "files": 2,
+        "input_sha256": "78e39d6c13900a748eb2127e655a185051b156ee37987836b1aef8df4c6108fa",
+        "output_bytes": 3150,
+        "commands": {
+          "cgrep": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-n",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "gnu-grep": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/grep",
+            "--color=never",
+            "-F",
+            "-n",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-n",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-n",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-n",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "cgrep-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/candidate",
+            "-n",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j1": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-n",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j2": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-n",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j4": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-n",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-j8": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-n",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "rg-default": [
+            "rg",
+            "--no-config",
+            "--no-heading",
+            "--color=never",
+            "-F",
+            "-n",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-n",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-n",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-n",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-n",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "baseline-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/previous",
+            "-n",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-n",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j1": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-n",
+            "-j1",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j2": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-n",
+            "-j2",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j4": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-n",
+            "-j4",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ],
+          "installed-j8": [
+            "/tmp/cgrep-batch-spot.hluQhjaA/payload-reviewed/bin/installed",
+            "-n",
+            "-j8",
+            "--",
+            "alpha",
+            "f0000.txt",
+            "f0001.txt"
+          ]
+        },
+        "samples": {
+          "cgrep": [
+            0.000491729995701462
+          ],
+          "gnu-grep": [
+            0.0018658320186659694
+          ],
+          "cgrep-j1": [
+            0.0005406819982454181
+          ],
+          "cgrep-j2": [
+            0.0007187549490481615
+          ],
+          "cgrep-j4": [
+            0.0006104029598645866
+          ],
+          "cgrep-j8": [
+            0.0008071609772741795
+          ],
+          "rg-j1": [
+            0.0014229929656721652
+          ],
+          "rg-j2": [
+            0.002848401025403291
+          ],
+          "rg-j4": [
+            0.003091896011028439
+          ],
+          "rg-j8": [
+            0.0031110920244827867
+          ],
+          "rg-default": [
+            0.004329301998950541
+          ],
+          "baseline": [
+            0.0006664270185865462
+          ],
+          "baseline-j1": [
+            0.0005159260472282767
+          ],
+          "baseline-j2": [
+            0.0007542120292782784
+          ],
+          "baseline-j4": [
+            0.0006842609727755189
+          ],
+          "baseline-j8": [
+            0.000729004037566483
+          ],
+          "installed": [
+            0.0005109059857204556
+          ],
+          "installed-j1": [
+            0.000582450011279434
+          ],
+          "installed-j2": [
+            0.0008029030286706984
+          ],
+          "installed-j4": [
+            0.0007881349883973598
+          ],
+          "installed-j8": [
+            0.0007238039979711175
+          ]
+        },
+        "cpu_samples": {
+          "cgrep": [
+            0.0003820000000000004
+          ],
+          "gnu-grep": [
+            0.0007619999999999919
+          ],
+          "cgrep-j1": [
+            0.0004339999999999969
+          ],
+          "cgrep-j2": [
+            0.0006829999999999961
+          ],
+          "cgrep-j4": [
+            0.0005900000000000002
+          ],
+          "cgrep-j8": [
+            0.0007869999999999891
+          ],
+          "rg-j1": [
+            0.0012719999999999884
+          ],
+          "rg-j2": [
+            0.0018449999999999925
+          ],
+          "rg-j4": [
+            0.0024889999999999912
+          ],
+          "rg-j8": [
+            0.003161000000000004
+          ],
+          "rg-default": [
+            0.003835999999999992
+          ],
+          "baseline": [
+            0.0005059999999999995
+          ],
+          "baseline-j1": [
+            0.0004000000000000045
+          ],
+          "baseline-j2": [
+            0.0007440000000000016
+          ],
+          "baseline-j4": [
+            0.0006680000000000089
+          ],
+          "baseline-j8": [
+            0.0006959999999999952
+          ],
+          "installed": [
+            0.00041100000000000164
+          ],
+          "installed-j1": [
+            0.0004900000000000113
+          ],
+          "installed-j2": [
+            0.000774999999999991
+          ],
+          "installed-j4": [
+            0.0007650000000000087
+          ],
+          "installed-j8": [
+            0.0007040000000000032
+          ]
+        },
+        "complete": true
+      }
+    ],
+    "validated_invocations": 42
+  },
+  "smoke_scope": "42 exact-output timed invocations, one small fixture plain/numbered; not quiet qualification",
+  "prepared_qualification": "3 cgrep versions serial/j1/j2/j4/j8, GNU, rg j1/j2/j4/j8/default; 6 workloads plain/numbered x21rounds=5292",
+  "safeguards": "Reviewed failure-preserving execution, transfer status, bounded uploads/group shutdown; prearmed task cleanup, atomic state and recovery; SDKfakes/real timeout/corruption controls. No guest install.",
+  "limits": [
+    "cloud capacity failure is not a benchmark result",
+    "no fresh acceptance needed: tested C/binaries unchanged",
+    "reviewer model identity unavailable; cross-family independence not established",
+    "SDK fakes do not prove every AWS failure path",
+    "no install, commit/push, CI change or optimization"
+  ],
+  "cleanup_reproduction": "python3 build/batch-spot-attempt-20261014/cgrep-batch-spot.hluQhjaA/verify_cleanup.py build/batch-spot-attempt-20261014"
+}

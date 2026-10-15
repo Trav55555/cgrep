@@ -39,20 +39,23 @@ def main():
         ("two-hot-anchors", "bc" + "a" * 30, two_hot_line * (target // len(two_hot_line)), b"", 1),
         ("three-hot-anchors", "bcd" + "a" * 29, three_hot_line * (target // len(three_hot_line)), b"", 1),
     ]
-    report = {"ripgrep": subprocess.check_output(["rg", "--version"], text=True).splitlines()[0],
-              "repeats": args.repeats, "cache": "warm", "cases": []}
+    env = dict(os.environ, LC_ALL="C")
+    report = {"ripgrep": subprocess.check_output(["rg", "--version"], text=True, env=env).splitlines()[0],
+              "grep": subprocess.check_output(["grep", "--version"], text=True, env=env).splitlines()[0],
+              "locale": env["LC_ALL"], "repeats": args.repeats, "cache": "warm", "cases": []}
     rng = random.Random(42)
     with tempfile.TemporaryDirectory(prefix="cgrep-benchmark-") as directory:
         path = Path(directory) / "corpus.txt"
         for name, pattern, data, expected, status in corpora:
             path.write_bytes(data)
             commands = {"cgrep": [binary, "--", pattern, str(path)],
-                        "rg": ["rg", "--no-config", "-F", "-j1", "--", pattern, str(path)]}
+                        "rg": ["rg", "--no-config", "-F", "-j1", "--", pattern, str(path)],
+                        "grep": ["grep", "-F", "--", pattern, str(path)]}
             if args.baseline:
                 commands["baseline"] = [str(args.baseline.resolve()), "--", pattern, str(path)]
             samples = {tool: [] for tool in commands}
             for tool, command in commands.items():
-                result = subprocess.run(command, capture_output=True, timeout=30)
+                result = subprocess.run(command, capture_output=True, timeout=30, env=env)
                 if (result.returncode, result.stdout, result.stderr) != (status, expected, b""):
                     raise RuntimeError(f"{name}: {tool} produced an incorrect result: {result!r}")
             for _ in range(args.repeats):
@@ -61,7 +64,7 @@ def main():
                 for tool in order:
                     started = time.perf_counter()
                     result = subprocess.run(commands[tool], stdout=subprocess.DEVNULL,
-                                            stderr=subprocess.PIPE, timeout=30)
+                                            stderr=subprocess.PIPE, timeout=30, env=env)
                     samples[tool].append(time.perf_counter() - started)
                     if result.returncode != status or result.stderr:
                         raise RuntimeError(f"{name}: {tool} failed during measurement")
@@ -69,7 +72,8 @@ def main():
             report["cases"].append({"name": name, "bytes": len(data),
                                     "sha256": hashlib.sha256(data).hexdigest(),
                                     "seconds": medians, "samples": samples,
-                                    "ratio_cgrep_to_rg": medians["cgrep"] / medians["rg"]})
+                                    "ratio_cgrep_to_rg": medians["cgrep"] / medians["rg"],
+                                    "ratio_cgrep_to_grep": medians["cgrep"] / medians["grep"]})
     rendered = json.dumps(report, indent=2) + "\n"
     if args.output:
         args.output.write_text(rendered)

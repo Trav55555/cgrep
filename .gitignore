@@ -1,3 +1,4 @@
+ci-artifacts/
 build/
 build-sanitize/
 .dcheck/

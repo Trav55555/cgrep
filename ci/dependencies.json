@@ -2,8 +2,8 @@
   "schema": "cgrep.ci-dependencies/0",
   "c-utils": {
     "url": "https://git.traversannan.com/trav/c-utils.git",
-    "revision": "75748c7f86dc50c8c16bf4cdf143534508bbba9e",
-    "tree": "1735510931c8db43f79d8273dd3c44b77e3d353f"
+    "revision": "2b1b48853f0cced1c2a8e71249551c506b267534",
+    "tree": "864a5604e142bb4e10ab511d031ec8ece1f88380"
   },
   "dependable-c-agent-toolchain": {
     "url": "https://git.traversannan.com/trav/dependable-c-agent-toolchain.git",

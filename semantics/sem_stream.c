@@ -50,6 +50,7 @@ static void scanner_read_error(void)
     search.out = out;
     search.write = NULL;
     search.cancelled = NULL;
+    search.finder = NULL;
     search.context = NULL;
     cu_input_attach(&input, in);
     result = search_stream(&search, "<stdin>", &input, &buffer);

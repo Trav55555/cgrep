@@ -48,6 +48,7 @@ def main():
         ("borrow-mask", "tests/test_count.c", "~(((word & low) + low) | word | low) & high", "(word - ones) & ~word & high"),
         ("lane-sum", "tests/test_count.c", "((sizeof word - 1) * CHAR_BIT)", "((sizeof word - 1) * CHAR_BIT - 1)"),
         ("lane-batch-overflow", "tests/test_count.c", "if (span > 16)\n                    span = 16;", "if (span > 64)\n                    span = 64;"),
+        ("duplicated-fourth-word", "tests/test_count.c", "memcpy(&w3, p + 3 * sizeof word, sizeof w3);", "memcpy(&w3, p + 2 * sizeof word, sizeof w3);"),
     ]
     with tempfile.TemporaryDirectory(prefix="cgrep-serial-sensitivity-") as directory:
         work = Path(directory)
