@@ -16,13 +16,15 @@ in the linked records; matching `.text` does not mean whole ELF files match.
 
 | Executable | SHA-256 prefix | Evidence and meaning |
 | --- | --- | --- |
-| Installed baseline | `547021b9eb2c2069` | [Quiet predecessor comparison](spot-qualification.json); unchanged installed executable. |
+| Installed `7c775ea` build | `96699d9db0d969bf` | [Plain](installed-sweep-20261015.json) and [numbered](installed-sweep-numbers-20261015.json) busy-workstation sweeps; accepted by `make verify` and Gitea run 421. |
+| Previous installed baseline | `547021b9eb2c2069` | [Quiet predecessor comparison](spot-qualification.json), and the paired baseline of the 2026-10-15 sweeps; kept as `~/.local/bin/cgrep.prev-547021b9`. |
 | Counting/filename predecessor | `0042aeb90ae90e94` | [Acceptance and diagnostics](count-output-followup.json), then [quiet comparison](spot-qualification.json); specific gains and a regression, not universal nonregression. |
 | Accepted batched-writer build | `0e7c1cf2185f4ae2` | [Output-batch record](output-batch-followup.json); correctness accepted, performance unqualified. |
 | Local batched-writer build | `7040733d8bf9845d` | [Output-batch record](output-batch-followup.json); executable text matched the accepted build, whole-file hash differs. |
 
-The unpublished working tree is not the published `a5ab2e7` source tree.
-A successful historical Gitea run does not verify later local changes.
+The batched writer and review fixes were published as `52c5898` (Gitea
+run 371) and `--version` as `7c775ea` (run 421). A successful Gitea run
+does not verify later local changes.
 
 Historical source manifests also cover recorder and verification scripts.
 Tooling changes alone can make a live-tree recorder reject a historical
@@ -34,6 +36,7 @@ Focused recorder tests do not reissue a full acceptance receipt.
 
 | Record | What it establishes | What it does not establish |
 | --- | --- | --- |
+| [installed-sweep-20261015.json](installed-sweep-20261015.json), [installed-sweep-numbers-20261015.json](installed-sweep-numbers-20261015.json) | Validated paired 7-round medians of the installed build versus the previous one, ripgrep and GNU grep, with every sample. | Quiet-host qualification; the load average was 3-4.5. |
 | [output-batch-followup.json](output-batch-followup.json) | Full isolated acceptance `verify.2MT7um`, 12,000 ordered comparisons, 91.59% / 91.78% coverage, diagnostic samples and instruction profiles. | Quiet native speedup, competitor parity or pthread semantic proof. |
 | [batch-spot-attempt.json](batch-spot-attempt.json) | Three same-type Spot capacity failures, local smoke/controls and timestamped task cleanup checks. | A launched instance or any qualification timing. |
 | [batch-alternate-attempt.json](batch-alternate-attempt.json) | Four alternate-type capacity failures, a separate invalid-bucket-name failure and task cleanup queries. | A launched instance, qualification timing, account-wide cleanup or invoice verification. |

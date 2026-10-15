@@ -5,6 +5,72 @@ representative literal searches without weakening correctness, ordered output,
 error handling, linear search bounds, or memory limits. The target is unmet.
 Default execution remains serial; worker selection is explicit.
 
+## Installed build: sweep of 2026-10-15
+
+The installed `7c775ea` build (SHA-256 `96699d9d…`, c-utils `2b1b488`) was
+run against the previously installed executable (`547021b9…`) in randomized
+paired order. Each run used 64 MiB inputs, 7 rounds, `LC_ALL=C` and
+complete output to tmpfs files, inside a 3 GiB/no-swap scope at nice 15.
+Every output was validated. The workstation was busy (load average 3-4.5),
+so differences under about 1 ms are noise. Tools: ripgrep 14.1.1 and GNU
+grep 3.11 on 12 logical CPUs. Raw samples are in
+[installed-sweep-20261015.json](installed-sweep-20261015.json) and
+[installed-sweep-numbers-20261015.json](installed-sweep-numbers-20261015.json).
+
+Median ms, plain output:
+
+| Workload | New | Old | New -j8 | Old -j8 | rg -j1 | rg -j8 | GNU grep |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| mixed-heavy | 40.0 | 73.1 | 11.7 | 77.4 | 40.2 | 14.2 | 67.0 |
+| mixed-common-anchor | 13.0 | 66.2 | 3.9 | 15.8 | 13.5 | 6.1 | 18.7 |
+| mixed-rare-absent | 8.1 | 8.8 | 7.9 | 9.0 | 8.7 | 8.7 | 30.7 |
+| matching-output-heavy | 19.0 | 20.6 | 7.5 | 18.0 | 27.5 | 10.5 | 20.3 |
+| small-late-match | 9.1 | 9.0 | 4.1 | 7.7 | 15.1 | 8.0 | 8.7 |
+| small-absent | 7.7 | 7.6 | 3.7 | 7.0 | 12.7 | 7.3 | 8.4 |
+| medium-late-match | 10.1 | 10.1 | 3.5 | 3.7 | 12.6 | 5.9 | 11.3 |
+| medium-absent | 10.4 | 10.2 | 3.2 | 3.5 | 12.2 | 5.9 | 11.2 |
+| medium-uniform-stress | 9.4 | 9.1 | 3.2 | 3.4 | 111.6 | 30.8 | 14.5 |
+| single-large-absent | 9.7 | 10.1 | 9.8 | 9.8 | 9.4 | 9.4 | 10.7 |
+
+Median ms, `-n`:
+
+| Workload | New | Old | New -j8 | Old -j8 | rg -j1 | rg -j8 | GNU grep |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| mixed-heavy | 47.6 | 85.1 | 12.5 | 87.7 | 53.5 | 15.2 | 80.3 |
+| mixed-common-anchor | 13.7 | 74.1 | 4.0 | 14.5 | 14.8 | 6.5 | 26.4 |
+| mixed-rare-absent | 11.0 | 18.3 | 10.6 | 18.6 | 10.3 | 9.9 | 39.4 |
+| matching-output-heavy | 23.1 | 25.5 | 8.7 | 21.7 | 37.4 | 12.1 | 31.1 |
+| small-late-match | 9.4 | 10.7 | 4.2 | 8.6 | 15.3 | 7.7 | 11.3 |
+| small-absent | 7.6 | 9.5 | 3.4 | 7.8 | 13.3 | 7.2 | 10.4 |
+| medium-late-match | 11.2 | 16.7 | 3.6 | 4.5 | 13.7 | 6.0 | 21.3 |
+| medium-absent | 11.3 | 16.9 | 3.7 | 4.5 | 13.8 | 6.3 | 21.7 |
+| medium-uniform-stress | 12.5 | 16.8 | 3.8 | 4.4 | 115.1 | 30.8 | 22.2 |
+| single-large-absent | 10.5 | 16.1 | 10.5 | 16.1 | 8.9 | 9.1 | 20.2 |
+
+Against the old executable:
+
+- Serial mixed text: 1.8x faster with heavy output, 5x with a common
+  anchor byte.
+- `-j8` heavy output: 6.6x faster. The old executable's `-j8` was slower
+  than its own serial run there.
+- Serial `-n`: typically 25-45% faster on files without heavy output,
+  10% on heavy output.
+- Small files at `-j8`: about 2x faster.
+- No case was slower beyond noise.
+
+Against the competitors:
+
+- cgrep `-j8` with ordered output was faster than `rg -j8` (which prints
+  in completion order) in every multi-file case.
+- Serially, cgrep matched or beat `rg -j1` on mixed text, except
+  single-file numbered rare-absent (11.0 versus 10.3 ms).
+- ripgrep stayed ahead on single-file numbered absent search (8.9 versus
+  10.5 ms), helped by mmap.
+- GNU grep was slower in every case.
+
+These are busy-workstation results, not quiet-host qualification, so the
+target above stays unmet until a quiet comparison confirms them.
+
 ## Current candidate: review fixes of 2026-10-14
 
 The [performance review](PERFORMANCE-REVIEW-20261014.md) found that every
