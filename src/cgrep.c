@@ -49,7 +49,13 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
  * before the candidate filter resumes. */
 #define KMP_WINDOW ((size_t)4096)
 
-static const char usage[] = "usage: cgrep [-n] [-j N] PATTERN [PATH...]\n";
+/* make passes the cgrep and c-utils revisions; other builds lack them. */
+#ifndef CGREP_REVISION
+#define CGREP_REVISION "unknown"
+#endif
+
+static const char usage[] = "usage: cgrep [-n] [-j N] PATTERN [PATH...]\n"
+                            "       cgrep --version\n";
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
@@ -938,6 +944,10 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
             }
             i++;
             continue;
+        }
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+            fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
+            return fflush(out) != 0 || ferror(out) ? 2 : 0;
         }
         if (strcmp(argv[i], "-n") != 0) {
             fprintf(err, "cgrep: unknown flag %s\n%s", argv[i], usage);

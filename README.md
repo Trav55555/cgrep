@@ -9,6 +9,7 @@ make                         # builds build/cgrep
 ./build/cgrep [-n] [-j N] PATTERN [PATH...]
 printf 'one\ntwo one\n' | ./build/cgrep -n one
 ./build/cgrep -- -needle file.txt
+./build/cgrep --version       # cgrep 0.1.0 (<rev>, c-utils <rev>)
 ```
 
 With no paths, or a path of `-`, cgrep reads standard input. Multiple

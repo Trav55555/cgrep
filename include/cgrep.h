@@ -2,6 +2,7 @@
  * cgrep: ripgrep reimplemented on c-utils, as c-utils' first consumer.
  *
  * Usage: cgrep [-n] [-j N] PATTERN [PATH...]
+ *        cgrep --version
  *
  * Prints the lines containing PATTERN (a literal byte string, for now),
  * using ripgrep-style non-terminal text output: a bare line for
@@ -27,6 +28,9 @@
  */
 #ifndef CGREP_H
 #define CGREP_H
+
+/* --version also prints the source revisions the build recorded. */
+#define CGREP_VERSION "0.1.0"
 
 #include <stdio.h>
 

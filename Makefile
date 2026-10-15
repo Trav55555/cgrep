@@ -12,11 +12,21 @@ SRCS = $(wildcard src/*.c) $(wildcard $(CUTILS)/src/*.c)
 TESTS := $(patsubst tests/%.c,$(BUILD)/%,$(wildcard tests/test_*.c)) \
          $(patsubst semantics/%.c,$(BUILD)/%,$(wildcard semantics/sem_*.c))
 
-.PHONY: all check test difftest iotest mutate verify
+.PHONY: all check test difftest iotest mutate verify FORCE
 all: $(BUILD)/cgrep
 
-$(BUILD)/cgrep: cmd/main.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
-	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ cmd/main.c $(SRCS)
+$(BUILD)/cgrep: cmd/main.c $(SRCS) src/parallel.inc include/cgrep.h $(CUTILS)/include/cu.h $(BUILD)/revision | $(BUILD)
+	$(CC) $(STRICT) $(CFLAGS) $(INCS) -DCGREP_REVISION="\"$$(cat $(BUILD)/revision)\"" -o $@ cmd/main.c $(SRCS)
+
+# Revisions for --version. A tree without its own .git reports unknown
+# rather than an enclosing repository's. Rewritten only when they change.
+$(BUILD)/revision: FORCE | $(BUILD)
+	@rev() { if [ -e "$$1/.git" ]; then git -C "$$1" describe --always --dirty 2>/dev/null || echo unknown; \
+	  else echo unknown; fi; }; \
+	r="$$(rev .), c-utils $$(rev $(CUTILS))"; \
+	if [ "$$(cat $@ 2>/dev/null)" != "$$r" ]; then printf '%s\n' "$$r" > $@; fi
+
+FORCE:
 
 test: $(TESTS)
 	@for t in $(TESTS); do echo "$$t"; "$$t" || exit 1; done

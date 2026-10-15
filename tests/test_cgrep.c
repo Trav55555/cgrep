@@ -337,6 +337,23 @@ static void test_usage(void)
     assert(strstr(err_text, "--no-such-flag") != NULL && out_text[0] == '\0');
 }
 
+/* Builds without make's revision define report "unknown". */
+static void test_version(void)
+{
+    static const char *const long_flag[] = {"--version"};
+    static const char *const short_flag[] = {"-n", "-V", "alpha", "@missing"};
+    static const char prefix[] = "cgrep " CGREP_VERSION " (";
+    size_t n;
+
+    assert(run(NULL, 1, long_flag) == 0);
+    n = strlen(out_text);
+    assert(strncmp(out_text, prefix, sizeof prefix - 1) == 0);
+    assert(n > sizeof prefix && strcmp(out_text + n - 2, ")\n") == 0);
+    assert(err_text[0] == '\0');
+    assert(run(NULL, 4, short_flag) == 0);
+    assert(strncmp(out_text, prefix, sizeof prefix - 1) == 0 && err_text[0] == '\0');
+}
+
 int main(void)
 {
     const char *tmp;
@@ -355,6 +372,7 @@ int main(void)
     test_lines();
     test_stdin();
     test_usage();
+    test_version();
     test_boundaries_and_explicit_stdin();
     test_literal_shapes();
     test_output_error();
