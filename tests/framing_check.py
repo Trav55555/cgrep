@@ -54,12 +54,13 @@ def main():
                   f"{'ASan/UBSan/LSan' if sanitize else 'native'}", flush=True)
         if args.sensitivity:
             for name, old, new in [
-                ("missing-newline", "            parts[part_count++] = cu_str_n(\"\\n\", 1);", "            /* seeded missing newline */"),
-                ("missing-inline-newline", "            output_len++;", "            output_len += 0;"),
+                ("missing-newline", "        parts[part_count++] = cu_str_n(\"\\n\", 1);", "        /* seeded missing newline */"),
+                ("missing-run-newline", "        parts[1] = cu_str_n(\"\\n\", 1);", "        parts[1] = cu_str_n(\"\", 0);"),
+                ("missing-inline-newline", "        output_len++;", "        output_len += 0;"),
                 ("short-filename", "cu_str_n(name, name_len);", "cu_str_n(name, name_len - 1);"),
                 ("missing-filename-colon", "parts[part_count++] = cu_str_n(\":\", 1);", "/* seeded missing filename colon */"),
-                ("wrong-number", 'number_prefix(number + sizeof number, seen + 1);',
-                 'number_prefix(number + sizeof number, seen + 2);'),
+                ("wrong-number", 'number_prefix(number + sizeof number, p->seen + 1);',
+                 'number_prefix(number + sizeof number, p->seen + 2);'),
                 ("wrong-nul-offset", "nul_offset = read_base + (unsigned long)(nul - destination);",
                  "nul_offset = read_base + (unsigned long)(nul - destination) + 1;")
             ]:

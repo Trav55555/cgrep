@@ -102,6 +102,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     cu_arena_init(&a);
     CU_VEC_INIT(&buffer, &a, char);
     assert(literal_init(&searcher.literal, &a, cu_str_n(pattern, n)));
+    search_init(&searcher, sink);
     searcher.numbers = data[1] & 1;
     searcher.names = data[1] & 2;
     searcher.out = sink;

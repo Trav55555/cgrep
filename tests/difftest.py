@@ -5,8 +5,8 @@
 Generates files (a small alphabet, so matches are common; empty lines, CRLF,
 missing final newlines, NUL bytes near the start of some files) and
 patterns (substrings of the corpus, single bytes, absent strings, the empty
-pattern), then runs both tools on one file, several files, -n, and standard
-input. stdout and the exit status must be identical; stderr must be empty
+pattern), then runs both tools on one file, several files, -n, -v, -c, -l
+(some clustered), and standard input. stdout and the exit status must be identical; stderr must be empty
 in both or non-empty in both. The reference uses --no-mmap because cgrep
 streams. Long binary lines, BOM/encoding conversion, and directories are
 outside this generated corpus. Four larger text inputs exercise refills.
@@ -89,6 +89,18 @@ def main() -> int:
         for case in range(args.cases):
             pattern = make_pattern(rng, files)
             numbers = ["-n"] if rng.random() < 0.5 else []
+            # Selection and summary flags, sometimes clustered with -n.
+            roll = rng.random()
+            if roll < 0.12:
+                numbers += ["-v"]
+            elif roll < 0.2:
+                numbers += ["-c"]
+            elif roll < 0.28:
+                numbers += ["-l"]
+            elif roll < 0.33:
+                numbers += [rng.choice(["-vc", "-vl", "-cl", "-lc"])]
+            elif roll < 0.36 and numbers:
+                numbers = [rng.choice(["-nv", "-vn", "-nc", "-ln"])]
             shape = rng.random()
             stdin = b""
             if shape < 0.2:

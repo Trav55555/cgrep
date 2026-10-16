@@ -337,6 +337,73 @@ static void test_usage(void)
     assert(strstr(err_text, "--no-such-flag") != NULL && out_text[0] == '\0');
 }
 
+/* -v, -c and -l, alone, clustered and combined, against expected texts
+ * taken from the reference. */
+static void test_selection_flags(void)
+{
+    static const char *const invert[] = {"-vn", "alpha", "@sa", "@sb"};
+    static const char *const invert_tail[] = {"-v", "alpha", "@stail"};
+    static const char *const count[] = {"-c", "alpha", "@sa", "@sb"};
+    static const char *const count_one[] = {"-c", "alpha", "@sa"};
+    static const char *const count_invert[] = {"-cv", "alpha", "@sa", "@sb"};
+    static const char *const files[] = {"-l", "alpha", "@sa", "@sb"};
+    static const char *const files_invert[] = {"-lv", "alpha", "@sa", "@sb"};
+    static const char *const files_stdin[] = {"-l", "alpha"};
+    static const char *const count_then_files[] = {"-cl", "alpha", "@sa"};
+    static const char *const files_then_count[] = {"-l", "-c", "alpha", "@sa"};
+    static const char *const count_binary[] = {"-c", "alpha", "@sbin"};
+    static const char *const files_binary[] = {"-l", "alpha", "@sbin"};
+    static const char *const invert_binary[] = {"-v", "alpha", "@sbin"};
+    static const char *const none[] = {"-c", "zzz", "@sa", "@sb"};
+    static const char *const invert_all[] = {"-v", "", "@sa"};
+    static const char *const count_empty[] = {"-c", "", "@stail"};
+    static const char *const invert_run[] = {"-v", "alpha", "@srun"};
+    static const char *const invert_run_numbered[] = {"-vn", "alpha", "@srun"};
+
+    write_file("sa", "alpha one\nbeta\nalpha two\n\ngamma", 31);
+    write_file("sb", "alpha\n", 6);
+    write_file("stail", "x\nalpha\nlast", 12);
+    write_file("sbin", "alpha\0alpha\nbeta\nalpha\n", 23);
+    write_file("srun", "alpha\nb1\nb2\nb3\nalpha\nc1\nc2", 26);
+    assert(run(NULL, 4, invert) == 0);
+    assert(strcmp(out_bare(), "sa:2:beta\nsa:4:\nsa:5:gamma\n") == 0);
+    assert(run(NULL, 3, invert_tail) == 0);
+    assert(strcmp(out_text, "x\nlast\n") == 0);
+    assert(run(NULL, 4, count) == 0);
+    assert(strcmp(out_bare(), "sa:2\nsb:1\n") == 0);
+    assert(run(NULL, 3, count_one) == 0);
+    assert(strcmp(out_text, "2\n") == 0);
+    assert(run(NULL, 4, count_invert) == 0);
+    assert(strcmp(out_bare(), "sa:3\n") == 0);
+    assert(run(NULL, 4, files) == 0);
+    assert(strcmp(out_bare(), "sa\nsb\n") == 0);
+    assert(run(NULL, 4, files_invert) == 0);
+    assert(strcmp(out_bare(), "sa\n") == 0);
+    assert(run("sb", 2, files_stdin) == 0);
+    assert(strcmp(out_text, "<stdin>\n") == 0);
+    assert(run(NULL, 3, count_then_files) == 0);
+    assert(strcmp(out_bare(), "sa\n") == 0);
+    assert(run(NULL, 4, files_then_count) == 0);
+    assert(strcmp(out_text, "2\n") == 0);
+    /* NUL ends lines for -c and -l; printing warns instead. */
+    assert(run(NULL, 3, count_binary) == 0);
+    assert(strcmp(out_text, "3\n") == 0);
+    assert(run(NULL, 3, files_binary) == 0);
+    assert(strcmp(out_bare(), "sbin\n") == 0);
+    assert(run(NULL, 3, invert_binary) == 0);
+    assert(strcmp(out_text, "binary file matches (found \"\\0\" byte around offset 5)\n") == 0);
+    assert(run(NULL, 4, none) == 1 && out_text[0] == '\0');
+    assert(run(NULL, 3, invert_all) == 1 && out_text[0] == '\0');
+    /* Adjacent unselected-line runs inside one window, and at its end. */
+    assert(run(NULL, 3, invert_run) == 0);
+    assert(strcmp(out_text, "b1\nb2\nb3\nc1\nc2\n") == 0);
+    assert(run(NULL, 3, invert_run_numbered) == 0);
+    assert(strcmp(out_text, "2:b1\n3:b2\n4:b3\n6:c1\n7:c2\n") == 0);
+    assert(run(NULL, 3, count_empty) == 0);
+    assert(strcmp(out_text, "3\n") == 0);
+    assert(err_text[0] == '\0');
+}
+
 /* Numbered lines whose prefix and body together straddle the CLI's
  * 256-byte output stage, one body longer than the stage, and a final
  * line without LF, whose newline is a separate part. */
@@ -412,7 +479,11 @@ int main(void)
     test_stdin();
     test_usage();
     test_version();
+#ifndef __cerb__
+    /* Under Cerberus these run in sem_flags.c, within their own time limit. */
     test_staged_output();
+    test_selection_flags();
+#endif
     test_boundaries_and_explicit_stdin();
     test_literal_shapes();
     test_output_error();

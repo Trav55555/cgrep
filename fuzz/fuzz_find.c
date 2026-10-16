@@ -12,6 +12,16 @@ int cgrep_fuzz_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #include "../src/cgrep.c"
 #undef cgrep_main
 
+/* Streaming containment across chunks through find_end's KMP state. */
+static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
+{
+    if (literal->text.len == 0)
+        return chunk.len != 0;
+    if (literal->text.len == 1)
+        return memchr(chunk.ptr, (unsigned char)literal->text.ptr[0], chunk.len) != NULL;
+    return find_end(chunk, 0, literal, state) != NO_MATCH;
+}
+
 /* A fresh filter per call. */
 static size_t find(CuStr hay, size_t start, const Literal *literal)
 {

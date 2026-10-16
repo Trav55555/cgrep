@@ -281,6 +281,9 @@ static void test_binary(void)
 static void test_line_limit(void)
 {
     static const char *const args[] = {"-n", "alpha"};
+    static const char *const counted[] = {"-c", "alpha"};
+    static const char *const listed[] = {"-l", "alpha"};
+    static const char *const uncounted[] = {"-cv", "alpha"};
     char *bytes;
 
     bytes = (char *)malloc(STREAM_LINE_LIMIT + 8);
@@ -306,6 +309,20 @@ static void test_line_limit(void)
     reset_faults();
     assert(run(2, args, bytes, STREAM_LINE_LIMIT + 1) == 0);
     assert(strstr(output_text, "binary file matches") != NULL && error_text[0] == '\0');
+    /* -c, -l and -v -c keep no lines, so a line past the limit is counted
+     * in one fixed buffer, as the reference does. */
+    memset(bytes, 'x', STREAM_LINE_LIMIT + 1);
+    memcpy(bytes + STREAM_LINE_LIMIT - 4, "alpha", 5);
+    bytes[STREAM_LINE_LIMIT + 1] = '\n';
+    reset_faults();
+    assert(run(2, counted, bytes, STREAM_LINE_LIMIT + 2) == 0);
+    assert(strcmp(output_text, "1\n") == 0 && error_text[0] == '\0' && buffer_allocations == 1);
+    reset_faults();
+    assert(run(2, listed, bytes, STREAM_LINE_LIMIT + 2) == 0);
+    assert(strcmp(output_text, "<stdin>\n") == 0 && buffer_allocations == 1);
+    reset_faults();
+    assert(run(2, uncounted, bytes, STREAM_LINE_LIMIT + 2) == 1);
+    assert(output_text[0] == '\0' && error_text[0] == '\0' && buffer_allocations == 1);
     free(bytes);
 }
 

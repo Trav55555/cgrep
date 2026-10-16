@@ -45,6 +45,7 @@ static void scanner_read_error(void)
     cu_arena_init(&input_arena);
     CU_VEC_INIT(&buffer, &input_arena, char);
     assert(literal_init(&search.literal, &pattern_arena, CU_LIT("a")));
+    search_init(&search, out);
     search.numbers = 0;
     search.names = 0;
     search.out = out;

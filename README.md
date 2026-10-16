@@ -6,16 +6,23 @@ searches over explicit files or standard input.
 
 ```sh
 make                         # builds build/cgrep
-./build/cgrep [-n] [-j N] PATTERN [PATH...]
+./build/cgrep [-clnv] [-j N] PATTERN [PATH...]
 printf 'one\ntwo one\n' | ./build/cgrep -n one
+./build/cgrep -vc one a.txt b.txt  # per-file counts of lines without "one"
 ./build/cgrep -- -needle file.txt
 ./build/cgrep --version       # cgrep 0.1.0 (<rev>, c-utils <rev>)
 ```
 
 With no paths, or a path of `-`, cgrep reads standard input. Multiple
-inputs get a path prefix; `-n` adds line numbers. The status is 0 for a
-match, 1 for no matches, or 2 for a usage, read, close, allocation, resource
-limit, or output error. An input failure does not prevent later paths from
+inputs get a path prefix; `-n` adds line numbers. `-v` selects lines that
+do not match. `-c` prints each input's count of selected lines (omitting
+zero counts) and `-l` the name of each input with one (`<stdin>` for
+standard input); the later of the two wins, and `-n` does not apply to
+either. Short flags cluster (`-vn`, `-cj4`). As in ripgrep, `-c` and `-l`
+treat NUL bytes as line ends and keep no lines, so the 8 MiB line limit
+does not apply to them; printing a binary input still stops at a warning.
+The status is 0 when a line is selected, 1 when none is, or 2 for a usage,
+read, close, allocation, resource limit, or output error. An input failure does not prevent later paths from
 being searched. An observed output failure stops serial input or cancels
 prefetched workers. On POSIX, a closed output pipe can terminate the CLI
 with SIGPIPE instead.

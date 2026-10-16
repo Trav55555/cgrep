@@ -54,7 +54,7 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-n] [-j N] PATTERN [PATH...]\n"
+static const char usage[] = "usage: cgrep [-clnv] [-j N] PATTERN [PATH...]\n"
                             "       cgrep --version\n";
 
 typedef struct {
@@ -78,6 +78,9 @@ typedef struct {
     Literal literal;
     int numbers; /* -n: prefix each line with its number */
     int names;   /* prefix each line with its input's name */
+    int invert;  /* -v: select lines without a match */
+    int count;   /* -c: print each input's selected-line count instead */
+    int files;   /* -l: print the name of each input with a selected line */
     FILE *out;
     /* Borrowed fragments are consumed synchronously; zero stops scanning. */
     int (*write)(void *context, const CuStr *parts, size_t count);
@@ -85,6 +88,21 @@ typedef struct {
     void *context;
     Finder *finder; /* per-input filter state; NULL uses a fresh one per window */
 } Search;
+
+/* Options off, output to out; the caller sets the literal. */
+static void search_init(Search *s, FILE *out)
+{
+    s->numbers = 0;
+    s->names = 0;
+    s->invert = 0;
+    s->count = 0;
+    s->files = 0;
+    s->out = out;
+    s->write = NULL;
+    s->cancelled = NULL;
+    s->context = NULL;
+    s->finder = NULL;
+}
 
 /* Background byte frequency ranks: higher is more common. From the memchr
  * crate's default_rank.rs (Unlicense), built from a mixed text/code/binary
@@ -174,15 +192,6 @@ static size_t find_end(CuStr hay, size_t start, const Literal *literal, size_t *
     }
     *state = matched;
     return NO_MATCH;
-}
-
-static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
-{
-    if (literal->text.len == 0)
-        return chunk.len != 0;
-    if (literal->text.len == 1)
-        return memchr(chunk.ptr, (unsigned char)literal->text.ptr[0], chunk.len) != NULL;
-    return find_end(chunk, 0, literal, state) != NO_MATCH;
 }
 
 /* Uniform patterns: every non-pattern byte blocks all starts through it.
@@ -556,107 +565,152 @@ static int emit(const Search *s, const CuStr *parts, size_t count)
     return !ferror(s->out);
 }
 
-/* Search a complete-line window, or the final unterminated tail. *lines
- * counts LF bytes before this window. -1 means an observed output error.
- * Without names or numbers, adjacent matching lines leave as one slice. */
-static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
+/* How selected lines are used: printed, counted, or only detected.
+ * Counting and detection stream (scan_window); printing keeps lines. */
+typedef enum { SELECT_PRINT, SELECT_COUNT, SELECT_FIRST } SelectMode;
+
+/* Output position within one window. Without names or numbers, adjacent
+ * selected lines are held as one run and leave as one slice. */
+typedef struct {
+    const char *name;
+    size_t name_len;
+    size_t run_start;
+    size_t run_end;
+    size_t counted;     /* LFs before this offset are in seen */
+    unsigned long seen;
+} Printer;
+
+static int flush_run(const Search *s, CuStr text, Printer *p)
 {
+    CuStr run;
+
+    if (p->run_end == p->run_start)
+        return 1;
+    run = cu_str_n(text.ptr + p->run_start, p->run_end - p->run_start);
+    p->run_start = p->run_end;
+    return emit(s, &run, 1);
+}
+
+/* Prints the line [start, stop): stop is its LF or text.len. */
+static int print_line(const Search *s, CuStr text, size_t start, size_t stop, Printer *p)
+{
+    char number[sizeof(unsigned long) * CHAR_BIT + 2];
+    CuStr parts[5];
+    size_t part_count;
+    size_t output_len;
+    const char *name;
+    size_t name_len;
+
+    output_len = stop - start;
+    if (stop < text.len)
+        output_len++;
+    if (!s->names && !s->numbers) {
+        if (p->run_end != start) {
+            if (!flush_run(s, text, p))
+                return 0;
+            p->run_start = start;
+        }
+        p->run_end = start + output_len;
+        if (stop < text.len)
+            return 1;
+        /* An unterminated last line leaves with its added newline. */
+        parts[0] = cu_str_n(text.ptr + p->run_start, p->run_end - p->run_start);
+        parts[1] = cu_str_n("\n", 1);
+        p->run_start = p->run_end;
+        return emit(s, parts, 2);
+    }
+    name = p->name;
+    name_len = p->name_len;
+    part_count = 0;
+    if (s->names) {
+        parts[part_count++] = cu_str_n(name, name_len);
+        parts[part_count++] = cu_str_n(":", 1);
+    }
+    if (s->numbers) {
+        p->seen += count_lines(text, p->counted, start);
+        p->counted = start;
+        parts[part_count++] = number_prefix(number + sizeof number, p->seen + 1);
+    }
+    parts[part_count++] = cu_str_n(text.ptr + start, output_len);
+    if (stop == text.len)
+        parts[part_count++] = cu_str_n("\n", 1);
+    if (!emit(s, parts, part_count))
+        return 0;
+    return 1;
+}
+
+/* Selects the lines of text, a complete-line window or the final
+ * unterminated tail, that match (or with -v do not). *lines counts LF
+ * bytes before this window. Returns 1 if a line was selected, 0 if none,
+ * -1 on an output error. SELECT_FIRST stops at the first selected line
+ * without output; SELECT_PRINT prints each one. */
+static int select_text(const Search *s, const char *name, CuStr text, unsigned long *lines,
+                       SelectMode mode)
+{
+    Printer p;
+    Finder local;
+    Finder *finder;
     size_t pos;
     size_t m;
     size_t start;
-    size_t end;
-    size_t counted;
-    size_t name_len;
-    size_t output_len;
-    size_t run_start;
-    size_t run_end;
-    char number[sizeof(unsigned long) * CHAR_BIT + 2];
-    CuStr prefix;
-    CuStr parts[5];
-    size_t part_count;
-    unsigned long seen;
-    Finder local;
-    Finder *finder;
+    size_t stop;
+    size_t at;
+    const char *nl;
     int matched;
-    int numbers;
-    int plain;
 
     matched = 0;
-    pos = 0;
-    counted = 0;
-    run_start = 0;
-    run_end = 0;
-    seen = *lines;
-    numbers = s->numbers;
-    plain = !s->names && !numbers;
-    prefix = cu_str_n("", 0);
-    name_len = s->names ? strlen(name) : 0;
+    p.name = name;
+    p.name_len = s->names ? strlen(name) : 0;
+    p.run_start = 0;
+    p.run_end = 0;
+    p.counted = 0;
+    p.seen = *lines;
     finder = s->finder;
     if (finder == NULL) {
         finder_init(&local, &s->literal);
         finder = &local;
     }
-    while (pos < text.len && (m = find_with(text, pos, &s->literal, finder)) != NO_MATCH) {
+    pos = 0;
+    while (pos < text.len) {
+        m = find_with(text, pos, &s->literal, finder);
         /* pos is always a line's start, so the match's line starts there
          * or after it. */
-        start = m;
-        while (start > pos && text.ptr[start - 1] != '\n')
-            start--;
-        end = m;
-        while (end < text.len && text.ptr[end] != '\n')
-            end++;
-        if (numbers) {
-            seen += count_lines(text, counted, start);
-            counted = start;
+        start = text.len;
+        stop = text.len;
+        if (m != NO_MATCH) {
+            start = m;
+            while (start > pos && text.ptr[start - 1] != '\n')
+                start--;
+            stop = m;
+            while (stop < text.len && text.ptr[stop] != '\n')
+                stop++;
         }
-        output_len = end - start;
-        if (end < text.len)
-            output_len++;
-        matched = 1;
-        part_count = 0;
-        if (plain) {
-            if (run_end != start) {
-                if (run_end != run_start) {
-                    parts[0] = cu_str_n(text.ptr + run_start, run_end - run_start);
-                    if (!emit(s, parts, 1))
+        if (s->invert ? start > pos : m != NO_MATCH) {
+            matched = 1;
+            if (mode != SELECT_PRINT)
+                return 1;
+            if (!s->invert) {
+                if (!print_line(s, text, start, stop, &p))
+                    return -1;
+            } else {
+                /* Every line from pos up to the matching line's start. */
+                for (at = pos; at < start; at = (size_t)(nl - text.ptr) + 1) {
+                    nl = (const char *)memchr(text.ptr + at, '\n', start - at);
+                    if (nl == NULL)
+                        nl = text.ptr + start;
+                    if (!print_line(s, text, at, (size_t)(nl - text.ptr), &p))
                         return -1;
                 }
-                run_start = start;
-            }
-            run_end = start + output_len;
-            if (end < text.len) {
-                pos = end + 1;
-                continue;
-            }
-            start = run_start;
-            output_len = run_end - run_start;
-            run_start = run_end;
-        } else {
-            if (s->names) {
-                parts[part_count++] = cu_str_n(name, name_len);
-                parts[part_count++] = cu_str_n(":", 1);
-            }
-            if (numbers) {
-                prefix = number_prefix(number + sizeof number, seen + 1);
-                parts[part_count++] = prefix;
             }
         }
-        parts[part_count++] = cu_str_n(text.ptr + start, output_len);
-        if (end == text.len)
-            parts[part_count++] = cu_str_n("\n", 1);
-        if (!emit(s, parts, part_count))
-            return -1;
-        if (end == text.len)
+        if (stop == text.len)
             break;
-        pos = end + 1;
+        pos = stop + 1;
     }
-    if (run_end != run_start) {
-        parts[0] = cu_str_n(text.ptr + run_start, run_end - run_start);
-        if (!emit(s, parts, 1))
-            return -1;
-    }
-    if (numbers)
-        *lines = seen + count_lines(text, counted, text.len);
+    if (!flush_run(s, text, &p))
+        return -1;
+    if (s->numbers && mode == SELECT_PRINT)
+        *lines = p.seen + count_lines(text, p.counted, text.len);
     return matched;
 }
 
@@ -707,6 +761,182 @@ static int binary_warning(const Search *s, const char *name, unsigned long offse
     return ferror(s->out) ? -1 : 1;
 }
 
+/* -c or -l output once an input is done. Returns 0 on an output error. */
+static int summary(const Search *s, const char *name, unsigned long selected)
+{
+    char digits[sizeof(unsigned long) * CHAR_BIT + 2];
+    CuStr parts[4];
+    size_t k;
+
+    k = 0;
+    if (s->count) {
+        if (s->names) {
+            parts[k++] = cu_str_n(name, strlen(name));
+            parts[k++] = cu_str_n(":", 1);
+        }
+        parts[k] = number_prefix(digits + sizeof digits, selected);
+        parts[k].len--; /* number_prefix ends with ':' */
+        k++;
+    } else {
+        parts[k++] = cu_str_n(name, strlen(name));
+    }
+    parts[k++] = cu_str_n("\n", 1);
+    return emit(s, parts, k);
+}
+
+/* NUL bytes end lines for -c, -l and a binary input's remaining scan, as
+ * in the reference's binary conversion. Patterns contain neither byte, so
+ * this creates and removes no match. */
+static void nul_to_lf(char *p, size_t n)
+{
+    char *nul;
+
+    while ((nul = (char *)memchr(p, '\0', n)) != NULL) {
+        *nul = '\n';
+        n -= (size_t)(nul - p) + 1;
+        p = nul + 1;
+    }
+}
+
+/* Line state carried between windows of a streaming scan. */
+typedef struct {
+    int marked;             /* the current line has a match */
+    int open;               /* the current line has bytes */
+    unsigned long selected;
+} LineScan;
+
+/* Scans window w, which starts inside the current line, without keeping
+ * whole lines. Returns 1 at the first selected line in SELECT_FIRST mode,
+ * else 0. *carry is set to how many trailing bytes the next window must
+ * start with: a match may still end in the next chunk. */
+static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Finder *finder,
+                       LineScan *ls, size_t *carry)
+{
+    const char *nl;
+    size_t pos;
+    size_t stop;
+    size_t keep;
+
+    pos = 0;
+    for (;;) {
+        nl = (const char *)memchr(w.ptr + pos, '\n', w.len - pos);
+        stop = nl == NULL ? w.len : (size_t)(nl - w.ptr);
+        if (!ls->marked && find_with(cu_str_n(w.ptr, stop), pos, &s->literal, finder) != NO_MATCH) {
+            ls->marked = 1;
+            /* A match selects its line unless inverted: stop reading. */
+            if (!s->invert && mode == SELECT_FIRST) {
+                ls->selected++;
+                return 1;
+            }
+        }
+        if (nl == NULL) {
+            ls->open |= pos < w.len;
+            break;
+        }
+        if (ls->marked != s->invert) {
+            ls->selected++;
+            if (mode == SELECT_FIRST)
+                return 1;
+        }
+        ls->marked = 0;
+        ls->open = 0;
+        pos = stop + 1;
+    }
+    *carry = 0;
+    if (at_end) {
+        if (ls->open && ls->marked != s->invert) {
+            ls->selected++;
+            return mode == SELECT_FIRST;
+        }
+        return 0;
+    }
+    keep = s->literal.text.len == 0 ? 0 : s->literal.text.len - 1;
+    if (!ls->marked)
+        *carry = w.len - pos < keep ? w.len - pos : keep;
+    return 0;
+}
+
+/* The rest of an input after buffer's first `held` bytes, in fixed-size
+ * windows. *total counts delivered bytes. Sets result->matched and, for a
+ * count, *selected. */
+static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held, SelectMode mode,
+                        unsigned long *total, unsigned long *selected, ScanResult *result)
+{
+    LineScan ls;
+    Finder local;
+    Finder *finder;
+    CuInputStatus status;
+    size_t carry;
+    size_t want;
+    size_t got;
+    int at_end;
+
+    ls.marked = 0;
+    ls.open = 0;
+    ls.selected = 0;
+    finder = s->finder;
+    if (finder == NULL) {
+        finder_init(&local, &s->literal);
+        finder = &local;
+    }
+    at_end = 0;
+    /* Bytes already held are scanned before anything more is read. */
+    if (held != 0) {
+        if (scan_window(s, cu_str_n(buffer->data, held), 0, mode, finder, &ls, &carry)) {
+            result->matched = 1;
+            return;
+        }
+        memmove(buffer->data, buffer->data + held - carry, carry);
+        held = carry;
+    }
+    for (;;) {
+        if (s->cancelled != NULL && s->cancelled(s->context)) {
+            result->error = SCAN_CANCELLED;
+            return;
+        }
+        /* held bytes count as the vector's contents so growth keeps them.
+         * The carry is shorter than the pattern, so a fixed buffer
+         * normally has room. */
+        buffer->len = held;
+        if (buffer->cap - held < STREAM_CHUNK / 2 && !cu_vec_reserve(buffer, STREAM_CHUNK)) {
+            result->error = SCAN_MEMORY;
+            return;
+        }
+        want = buffer->cap - held;
+        if (want > STREAM_CHUNK)
+            want = STREAM_CHUNK;
+        if (*total == 0)
+            want = 3;
+        status = cu_input_read(in, buffer->data + held, want, &got);
+        if (status == CU_INPUT_ERROR) {
+            result->error = SCAN_IO;
+            result->system_error = cu_input_errno(in);
+            return;
+        }
+        if (status == CU_INPUT_END) {
+            got = 0;
+            at_end = 1;
+        } else if (!add_bytes(total, got)) {
+            result->error = SCAN_RANGE;
+            return;
+        }
+        nul_to_lf(buffer->data + held, got);
+        held += got;
+        if (scan_window(s, cu_str_n(buffer->data, held), at_end, mode, finder, &ls, &carry)) {
+            result->matched = 1;
+            return;
+        }
+        if (at_end)
+            break;
+        memmove(buffer->data, buffer->data + held - carry, carry);
+        held = carry;
+    }
+    buffer->len = 0;
+    *selected += ls.selected;
+    if (ls.selected != 0)
+        result->matched = 1;
+}
+
 static ScanResult search_stream(const Search *s, const char *name, CuInput *in, CuVec *buffer)
 {
     ScanResult result;
@@ -719,12 +949,11 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     size_t got;
     size_t old_len;
     size_t end;
-    size_t prefix;
     unsigned long total;
     unsigned long read_base;
     unsigned long lines;
+    unsigned long selected;
     unsigned long nul_offset;
-    int binary;
     int probing;
     int found;
 
@@ -733,9 +962,8 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     result.system_error = 0;
     total = 0;
     lines = 0;
+    selected = 0;
     nul_offset = 0;
-    prefix = 0;
-    binary = 0;
     /* A failed growth must not poison later inputs. Successful storage is
      * reused across files; only failed vectors discard their arena. */
     if (cu_vec_failed(buffer)) {
@@ -748,6 +976,12 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     cu_vec_clear(buffer);
     if (!cu_vec_reserve(buffer, STREAM_CHUNK)) {
         result.error = SCAN_MEMORY;
+        return result;
+    }
+    if (s->count || s->files) {
+        scan_stream(s, in, buffer, 0, s->count ? SELECT_COUNT : SELECT_FIRST, &total, &selected, &result);
+        if (result.error == SCAN_OK && result.matched && !summary(s, name, selected))
+            result.error = SCAN_OUTPUT;
         return result;
     }
     for (;;) {
@@ -778,8 +1012,8 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             break;
         }
         if (status == CU_INPUT_END) {
-            if (!binary && old_len != 0) {
-                found = search_text(s, name, cu_str_n(buffer->data, old_len), &lines);
+            if (old_len != 0) {
+                found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_PRINT);
                 if (found < 0)
                     result.error = SCAN_OUTPUT;
                 else
@@ -792,36 +1026,33 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             result.error = SCAN_RANGE;
             break;
         }
-        nul = binary ? NULL : (const char *)memchr(destination, '\0', got);
+        nul = (const char *)memchr(destination, '\0', got);
         if (nul != NULL) {
             nul_offset = read_base + (unsigned long)(nul - destination);
-            binary = 1;
-            if (result.matched ||
-                contains_chunk(&s->literal, cu_str_n(buffer->data, old_len), &prefix)) {
-                found = binary_warning(s, name, nul_offset);
-                result.matched = 1;
-                if (found < 0)
-                    result.error = SCAN_OUTPUT;
-                break;
+            /* Earlier output stands; one more selected line only warns. */
+            if (!result.matched) {
+                if (probing) {
+                    /* The full buffer is one line, ended by this NUL. */
+                    found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_FIRST);
+                    if (found > 0)
+                        result.matched = 1;
+                    else
+                        scan_stream(s, in, buffer, 0, SELECT_FIRST, &total, &selected, &result);
+                } else {
+                    nul_to_lf(destination, got);
+                    scan_stream(s, in, buffer, old_len + got, SELECT_FIRST, &total, &selected, &result);
+                }
             }
-        }
-        if (binary) {
-            if (contains_chunk(&s->literal, cu_str_n(destination, got), &prefix)) {
-                found = binary_warning(s, name, nul_offset);
-                result.matched = 1;
-                if (found < 0)
-                    result.error = SCAN_OUTPUT;
-                break;
-            }
-            cu_vec_clear(buffer);
-            continue;
+            if (result.error == SCAN_OK && result.matched && binary_warning(s, name, nul_offset) < 0)
+                result.error = SCAN_OUTPUT;
+            break;
         }
         if (probing) {
             if (extra != '\n') {
                 result.error = SCAN_LINE_LIMIT;
                 break;
             }
-            found = search_text(s, name, cu_str_n(buffer->data, old_len), &lines);
+            found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_PRINT);
             if (found < 0) {
                 result.error = SCAN_OUTPUT;
                 break;
@@ -840,7 +1071,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             end--;
         if (end == old_len)
             continue;
-        found = search_text(s, name, cu_str_n(buffer->data, end), &lines);
+        found = select_text(s, name, cu_str_n(buffer->data, end), &lines, SELECT_PRINT);
         if (found < 0) {
             result.error = SCAN_OUTPUT;
             break;
@@ -938,12 +1169,9 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     int matched;
     int failed;
     int jobs;
+    const char *flag;
 
-    s.numbers = 0;
-    s.out = out;
-    s.write = NULL;
-    s.cancelled = NULL;
-    s.context = NULL;
+    search_init(&s, out);
     s.finder = &finder;
     jobs = 1;
     i = 1;
@@ -952,29 +1180,44 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
             i++;
             break;
         }
-        if (strncmp(argv[i], "-j", 2) == 0) {
-            if (argv[i][2] != '\0')
-                jobs = worker_count(argv[i] + 2);
-            else if (i + 1 < argc)
-                jobs = worker_count(argv[++i]);
-            else
-                jobs = 0;
-            if (jobs == 0) {
-                fputs("cgrep: worker count must be 1 through 8\n", err);
-                return 2;
-            }
-            i++;
-            continue;
-        }
-        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+        if (strcmp(argv[i], "--version") == 0) {
             fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
             return fflush(out) != 0 || ferror(out) ? 2 : 0;
         }
-        if (strcmp(argv[i], "-n") != 0) {
-            fprintf(err, "cgrep: unknown flag %s\n%s", argv[i], usage);
-            return 2;
+        /* Short flags cluster: -vn, -cj4. A value flag takes the rest of
+         * its argument or, if that is empty, the next one. */
+        for (flag = argv[i] + 1; *flag != '\0'; flag++) {
+            if (*flag == 'n') {
+                s.numbers = 1;
+            } else if (*flag == 'c') {
+                s.count = 1;
+            } else if (*flag == 'l') {
+                /* -l replaces an earlier -c; a later -c wins, as it is
+                 * checked first. */
+                s.files = 1;
+                s.count = 0;
+            } else if (*flag == 'v') {
+                s.invert = 1;
+            } else if (*flag == 'V') {
+                fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
+                return fflush(out) != 0 || ferror(out) ? 2 : 0;
+            } else if (*flag == 'j') {
+                if (flag[1] != '\0')
+                    jobs = worker_count(flag + 1);
+                else if (i + 1 < argc)
+                    jobs = worker_count(argv[++i]);
+                else
+                    jobs = 0;
+                if (jobs == 0) {
+                    fputs("cgrep: worker count must be 1 through 8\n", err);
+                    return 2;
+                }
+                break;
+            } else {
+                fprintf(err, "cgrep: unknown flag %s\n%s", argv[i], usage);
+                return 2;
+            }
         }
-        s.numbers = 1;
         i++;
     }
     if (i >= argc) {

@@ -177,6 +177,12 @@ static int test_close(FILE *file)
 #endif
 #define cgrep_main parallel_cli
 #include "../src/cgrep.c"
+
+/* The printing selection the CLI runs without -c, -l or -v. */
+static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
+{
+    return select_text(s, name, text, lines, SELECT_PRINT);
+}
 #undef cgrep_main
 #ifdef CGREP_NATIVE_PARALLEL
 #undef pthread_join
@@ -459,6 +465,7 @@ static void callback_cases(void)
 
     cu_arena_init(&arena);
     assert(literal_init(&search.literal, &arena, cu_str_cstr("alpha")));
+    search_init(&search, NULL);
     search.names = 1;
     search.numbers = 1;
     search.out = NULL;

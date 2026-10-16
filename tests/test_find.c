@@ -52,6 +52,22 @@ int cgrep_find_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #undef cgrep_main
 #undef CGREP_KMP_STEP
 
+/* The printing selection the CLI runs without -c, -l or -v. */
+static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
+{
+    return select_text(s, name, text, lines, SELECT_PRINT);
+}
+
+/* Streaming containment across chunks through find_end's KMP state. */
+static int contains_chunk(const Literal *literal, CuStr chunk, size_t *state)
+{
+    if (literal->text.len == 0)
+        return chunk.len != 0;
+    if (literal->text.len == 1)
+        return memchr(chunk.ptr, (unsigned char)literal->text.ptr[0], chunk.len) != NULL;
+    return find_end(chunk, 0, literal, state) != NO_MATCH;
+}
+
 /* A fresh filter per call. */
 static size_t find(CuStr hay, size_t start, const Literal *literal)
 {
@@ -509,6 +525,7 @@ static void test_optional_numbering(void)
 
     cu_arena_init(&a);
     assert(literal_init(&s.literal, &a, CU_LIT("needle")));
+    search_init(&s, stdout);
     s.numbers = 0;
     s.names = 0;
     s.out = stdout;
