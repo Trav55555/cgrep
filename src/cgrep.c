@@ -55,7 +55,7 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-cilnvw] [-j N] PATTERN [PATH...]\n"
+static const char usage[] = "usage: cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]\n"
                             "       cgrep --version\n";
 
 typedef struct {
@@ -1430,12 +1430,15 @@ static char *join_path(CuArena *a, const char *dir, CuStr name)
     return p;
 }
 
+#include "ignore.inc"
+
 /* Adds the regular files under dir, depth first with each directory's
- * names in byte order, skipping names that start with '.', symbolic links
- * (never followed) and other non-regular entries, as the reference does
- * without ignore files. Reports each failure and returns 0, after adding
- * whatever else it could. */
-static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err)
+ * names in byte order, skipping symbolic links (never followed), other
+ * non-regular entries, names that start with '.' unless an ignore file
+ * un-ignores them, and anything an ignore file ignores (st, or none when
+ * NULL). Reports each failure and returns 0, after adding whatever else
+ * it could. */
+static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st)
 {
     CuDir d;
     CuDirEntry e;
@@ -1444,17 +1447,23 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err)
     char *path;
     size_t count;
     size_t i;
+    unsigned listed;
     int r;
     int ok;
+    int verdict;
 
     if (!cu_dir_open(&d, a, dir)) {
         fprintf(err, "cgrep: %s: %s\n", dir, cu_dir_errno(&d) == 0 ? "out of memory" : strerror(cu_dir_errno(&d)));
         return 0;
     }
     ok = 1;
+    listed = 0;
     CU_VEC_INIT(&entries, a, CuDirEntry);
     while ((r = cu_dir_next(&d, &e)) == 1) {
-        if ((e.name.len != 0 && e.name.ptr[0] == '.') || (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR))
+        listed |= ignore_listing_bit(e.name);
+        if (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR)
+            continue;
+        if (st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
             continue;
         CU_VEC_PUSH(&entries, &e);
     }
@@ -1464,6 +1473,10 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err)
         ok = 0;
     }
     cu_dir_close(&d);
+    if (st != NULL && !push_ignore_dir(st, dir, listed, 0, NULL)) {
+        fprintf(err, "cgrep: %s: out of memory\n", dir);
+        return 0;
+    }
     count = cu_vec_len(&entries);
     list = CU_VEC_DATA(&entries, CuDirEntry);
     if (count > 1)
@@ -1472,18 +1485,99 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err)
         path = join_path(a, dir, list[i].name);
         if (path == NULL) {
             fprintf(err, "cgrep: %s: out of memory\n", dir);
-            return 0;
+            ok = 0;
+            break;
+        }
+        if (st != NULL) {
+            verdict = ignore_verdict(st, path, list[i].kind == CU_DIR_DIR);
+            if (list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
+                continue;
         }
         if (list[i].kind == CU_DIR_FILE) {
             if (!add_input(inputs, path, 1)) {
                 fprintf(err, "cgrep: %s: out of memory\n", dir);
-                return 0;
+                ok = 0;
+                break;
             }
-        } else if (!walk(a, path, inputs, err)) {
+        } else if (!walk(a, path, inputs, err, st)) {
             ok = 0;
         }
     }
+    if (st != NULL)
+        pop_ignore_dir(st);
     return ok;
+}
+
+/* Pushes the directories above root, outermost first, for their ignore
+ * files. Without a working directory a relative root has none. */
+static int push_ignore_parents(IgnoreStack *st, const char *root)
+{
+    CuVec abs;
+    CuDir d;
+    CuArena probe;
+    char *absolute_path;
+    char *dir;
+    char *git;
+    const char *c;
+    size_t len;
+    size_t end;
+    size_t i;
+    unsigned listed;
+    int k;
+
+    st->root = root;
+    CU_VEC_INIT(&abs, st->arena, char);
+    if (root[0] != '/') {
+        if (st->cwd == NULL)
+            return 1;
+        for (c = st->cwd; *c != '\0'; c++)
+            CU_VEC_PUSH(&abs, c);
+    }
+    /* Components as the reference's paths give them: "." and empty ones
+     * dropped, ".." kept. */
+    for (c = root; *c != '\0';) {
+        while (*c == '/')
+            c++;
+        len = component_len(c, strlen(c));
+        if (len != 0 && !(len == 1 && c[0] == '.')) {
+            CU_VEC_PUSH(&abs, "/");
+            for (i = 0; i < len; i++)
+                CU_VEC_PUSH(&abs, &c[i]);
+        }
+        c += len;
+    }
+    CU_VEC_PUSH(&abs, "");
+    if (cu_vec_failed(&abs))
+        return 0;
+    absolute_path = CU_VEC_DATA(&abs, char);
+    end = strlen(absolute_path);
+    /* Each proper ancestor: "/" first, then longer prefixes. */
+    for (len = 0; len < end; len++) {
+        if (absolute_path[len] != '/')
+            continue;
+        dir = cu_arena_push_bytes(st->arena, len == 0 ? 2 : len + 1);
+        if (dir == NULL)
+            return 0;
+        memcpy(dir, absolute_path, len == 0 ? 1 : len);
+        dir[len == 0 ? 1 : len] = '\0';
+        listed = 0;
+        for (k = 0; k < IG_EXCLUDE; k++)
+            listed |= 1u << k;
+        git = join_path(st->arena, dir, cu_str_n(".git", 4));
+        if (git == NULL)
+            return 0;
+        cu_arena_init(&probe);
+        if (cu_dir_open(&d, &probe, git)) {
+            cu_dir_close(&d);
+            listed |= 1u << IG_KINDS;
+        } else if (cu_dir_errno(&d) == ENOTDIR) {
+            listed |= 1u << IG_KINDS;
+        }
+        cu_arena_release(&probe);
+        if (!push_ignore_dir(st, dir, listed, 1, absolute_path + len + 1))
+            return 0;
+    }
+    return 1;
 }
 
 /* Whether path names a directory that can be listed, following symbolic
@@ -1515,6 +1609,12 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     CuVec scratch;
     CuArena walk_arena;
     Inputs inputs;
+    IgnoreStack ignores;
+    IgnoreDir unused_dir;
+    char cwd[4096];
+    const char *config;
+    int ignoring;
+    int global_read;
     CuStr pattern;
     char *folded;
     char **paths;
@@ -1530,12 +1630,18 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 
     search_init(&s, out);
     s.finder = &finder;
+    ignoring = 1;
     jobs = 1;
     i = 1;
     while (i < argc && argv[i][0] == '-' && argv[i][1] != '\0') {
         if (strcmp(argv[i], "--") == 0) {
             i++;
             break;
+        }
+        if (strcmp(argv[i], "--no-ignore") == 0) {
+            ignoring = 0;
+            i++;
+            continue;
         }
         if (strcmp(argv[i], "--version") == 0) {
             fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
@@ -1619,12 +1725,44 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     cu_arena_init(&walk_arena);
     CU_VEC_INIT(&inputs.paths, &walk_arena, char *);
     CU_VEC_INIT(&inputs.walked, &walk_arena, unsigned char);
+    ignores.arena = &walk_arena;
+    CU_VEC_INIT(&ignores.dirs, &walk_arena, IgnoreDir);
+    ignores.global.rules = NULL;
+    ignores.global.count = 0;
+    ignores.cwd = NULL;
+    global_read = 0;
     for (k = i; k < argc; k++) {
         r = strcmp(argv[k], "-") != 0 && directory_argument(argv[k]);
         if (r) {
             s.names = 1;
-            if (!walk(&walk_arena, argv[k], &inputs, err))
+            if (ignoring && !global_read) {
+                global_read = 1;
+#ifdef CGREP_GETCWD
+                ignores.cwd = getcwd(cwd, sizeof cwd);
+#else
+                (void)cwd;
+#endif
+                config = getenv("XDG_CONFIG_HOME");
+                if (config != NULL && config[0] != '\0')
+                    r = read_ignore(&walk_arena, config, "git/ignore", &ignores.global);
+                else if ((config = getenv("HOME")) != NULL && config[0] != '\0')
+                    r = read_ignore(&walk_arena, config, ".config/git/ignore", &ignores.global);
+                if (!r) {
+                    fputs("cgrep: out of memory reading ignore files\n", err);
+                    failed = 1;
+                    break;
+                }
+            }
+            if (ignoring && !push_ignore_parents(&ignores, argv[k])) {
+                fputs("cgrep: out of memory reading ignore files\n", err);
                 failed = 1;
+                break;
+            }
+            if (!walk(&walk_arena, argv[k], &inputs, err, ignoring ? &ignores : NULL))
+                failed = 1;
+            /* The next root has its own parents. */
+            while (CU_VEC_POP(&ignores.dirs, &unused_dir))
+                ;
         } else if (!add_input(&inputs, argv[k], 0)) {
             fputs("cgrep: out of memory listing inputs\n", err);
             failed = 1;

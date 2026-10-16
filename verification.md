@@ -8,6 +8,187 @@ remains incomplete because the large suites exceed local resource limits. Mismat
 two- and three-hot-byte gaps. The tested corpus is not evidence of universal
 performance parity or a formal correctness proof.
 
+## Unpublished 2026-10-16 ignore-file verification
+
+Full `bash tests/verify.sh` passed on the corrected source in
+`build/ignore-handover.lr3RBB/acceptance-source/cgrep`, using the adjacent
+c-utils source snapshot. The script retained its systemd scope with
+`MemoryMax=3G`, `MemorySwapMax=0`, nice 15, and no core dumps. The
+ignore-owned inputs and dependency source match the working tree. Hashes
+are in `build/ignore-handover.lr3RBB/source-hashes.json`. The copies avoid
+sharing checker output with another session running in c-utils.
+
+Concurrent edits later appeared in `src/parallel.inc`, `tests/test_parallel.c`,
+`tests/parallel_check.py`, and `ci/dependencies.json`. Those edits were left
+untouched. The receipt qualifies the ignore candidate against the captured
+parallel and CI baseline, not the combined live tree. The differing hashes
+are in `build/ignore-handover.lr3RBB/concurrent-drift.json`. Combined-tree
+acceptance must follow those concurrent edits.
+
+The receipt is
+`build/ignore-handover.lr3RBB/acceptance-source/cgrep/build/verify.pGEFk5`;
+the complete log is `build/ignore-handover.lr3RBB/verify-selector-final.log`.
+This run includes the final exact-buffer tests, comment-only cleanup, and
+all 14 mutation-selector boundary cases.
+Required subset, lint, compiler matrix, analyzer, ASan/UBSan, MSan, TSan,
+release, wasm, i386, Valgrind, fuzz, and bounded-semantics checks passed.
+Cgrep line coverage is 90.26%, above the unchanged 90% floor.
+Dependency coverage is 91.85%. The cgrep percentage does not separately
+report `ignore.inc` and is not an ignore-module coverage percentage.
+Authority, regions, and absent CBMC proofs remain explicit cgrep skips.
+
+The native worker controls, framing/serial mutants, and I/O budgets passed.
+All four ordinary comparisons passed 3000/3000 cases, seeds 7 and 42 at
+`-j1` and `-j8`. Ignore comparisons passed 1000/1000 with seed 7 at `-j1`
+and seed 42 at `-j8`. `make check` was not run separately.
+
+Additional executed checks:
+
+- `make -j2 all test` passed with the captured dependency, then passed
+  again with the default sibling dependency. Native output is in
+  `native-complete.log` and `native-default-final.log` under the receipt
+  directory. The dependency source hashes match.
+- `python3 -I tests/ignore_difftest.py build/cgrep --cases 1000 --seed 1`
+  passed 1000/1000; the same command with seed 7, and seed 42 with
+  `--jobs 8`, also passed 1000/1000 each. The original seed-1, 26-case
+  reproducer passed 26/26 on the final native CLI.
+- `dcheck fast src/cgrep.c` and `dcheck fast tests/test_ignore.c` passed
+  subset and lint.
+- A targeted `-Wshadow` rebuild and execution of `test_walk` and
+  `test_parallel` passed after renaming the new shadowing locals.
+
+The new walk cases cover escaped `#`, `!`, `*`, and trailing spaces;
+CRLF and unterminated ignore lines; and leading, intermediate, and
+trailing `**`. Other cases cover directory-only rules against files,
+child negation under a pruned directory, unreadable ignore files,
+relative roots, `$HOME` global-file fallback, and ordered `-j8` output.
+Permission cases run when the host actually denies access. WASI skips
+the permission tests.
+
+`tests/test_ignore.c` adds exact-size heap buffers for glob and parser
+boundaries, final unterminated lines, blank rules, negated classes, and
+initial escapes. It injects allocation failure with `cu_arena_fail_at`.
+Synthetic stacks exercise the outermost repository, anchored global
+patterns, leading separators, and the ancestor span boundary. These are
+matcher tests, not proof of OS support for paths longer than 4095 bytes.
+
+### Failures found and fixed
+
+The first completed acceptance attempt failed subset checking because two
+new `joined` locals shadowed the parallel test's counter. It also failed
+coverage at 89.82%. The locals were renamed, and relative-root and HOME
+fallback tests exercised previously untested branches. The failed receipt
+and coverage log are retained as `deep-before.json` and
+`coverage-before.log` under `build/ignore-handover.lr3RBB`.
+
+The first mutation baseline failed before testing any mutants. Replaying
+its command with visible output exposed seed 1, case 25: an ancestor rule
+matched only the root prefix plus the basename, losing intermediate
+directories. A minimal parent rule `r/sub/x` therefore failed to exclude
+`r/sub/x` when searching `r`.
+
+Ancestor matching also incorrectly stripped a hidden name's leading dot
+for a search root of `.`. The new regression
+failed before the fix and passed afterward. Ancestor rules now receive
+the full path below the search root, with dots preserved. The baseline
+log and original generated fixture are retained under the same receipt
+directory. Earlier shared-checkout and pre-fix acceptance attempts were
+stopped. They are not passing acceptance evidence.
+
+A separate CLI probe found that bracket classes consumed backslashes as
+escapes, unlike ripgrep. The matcher now treats class backslashes as
+literal bytes and rejects reversed ranges. `class-before.log` records
+the old matcher failing the new walk assertion. The corrected walk suite
+passes. Malformed-pattern diagnostics remain outside compatibility.
+
+### Ignore mutation campaign
+
+`make mutate` ran against `src/ignore.inc` in the isolated mutation
+source copy, with two workers and an outer 3 GiB/no-swap scope. The first
+completed module campaign used `MUTATION_TIMEOUT=60` and the walk suite
+in native, ASan/UBSan, and MSan builds. Both differential suites ran 150
+cases. It classified 318 variants as 264 killed, 52 surviving, and 2
+invalid. Raw output is `mutate-scoped.log` under the receipt directory.
+
+After adding `test_ignore`, the signature-filtered runner `survivors.py`
+replayed all 52 survivors with `MUTATION_TIMEOUT=90`. It rejected 36 and
+left 16. A final replay of those 16 rejected 3 and left 13. Those logs
+are `mutate-survivors.log` and `mutate-final.log`. The module source did
+not change between these campaigns. The later commands added tests and
+retained the walk suite and both comparisons. They did not remove gates.
+
+The aggregate for the 318 distinct variants is **303 rejected, 13
+surviving, and 2 invalid**, or 95.9% rejection among valid variants.
+There were no runner-wide timeouts. A rejected command can include a
+strict-build failure or a per-test deadline, not only an assertion.
+The last two campaigns are reruns, not additional distinct variants.
+`make` exits 2 because the underlying runner exits 1 for survivors.
+The broad default campaign was stopped without a score. No completed
+mutation campaign for all of `src/cgrep.c` is claimed here.
+
+The following arguments cover all 13 remaining variants. Line and column
+numbers identify the `src/ignore.inc` snapshot in the raw mutation logs.
+
+| Location and change | Count | Argument |
+| --- | ---: | --- |
+| 73:14 and 74:14, initial `star_g` or `star_s` from 0 to 1 | 2 | Both values are assigned when a star sets `have_star`. Without that branch, neither initializer is read. |
+| 106:29, range guard `k + 2 < gl` to `k + 3 < gl` | 1 | A valid endpoint at `k + 2` requires a closing bracket at or after `k + 3`. Thus `k + 3 < gl` is already true for every valid range. An unclosed class fails either way. |
+| 116:23, closing check `<` to `<=` | 1 | The extra case has no closing bracket. It advances `gi` to `gl + 1`, which cannot pass the final `gi == gl` check. Backtracking retries the same unclosed class. No byte is read through that out-of-range index. |
+| 227:21, parse loop `<` to `<=` | 1 | The added iteration has zero remaining bytes and skips an empty rule. Empty file reads use the non-NULL empty-string sentinel. Loaded lengths remain below the allocation capacity, so the final increment does not wrap. |
+| 244:26, 244:29, 244:41, 244:63, and 244:83, suppress leading escaped `!` or `#` stripping | 5 | Comment and negation decisions happen before this branch. Keeping the backslash produces the same literal through `glob_component`'s ordinary escape handling. Neither form changes slash anchoring. |
+| 321:19, listing loop `<` to `<=` | 1 | The extra name is `.git/info/exclude`, which contains a slash and cannot be a directory-entry basename. |
+| 325:51, `.git` comparison length 4 to 5 | 1 | For a four-byte name the extra byte is its terminating NUL. `cu_dir_next` uses `cu_str_cstr_copy`, which writes that NUL. Ignore-file text is not assumed NUL-terminated. |
+| 327:12, default listing bit 0 to 1 | 1 | With a completed, stable listing, an existing `.rgignore` already set the bit. Otherwise the extra absent-file probe yields no rules when allocations succeed. This changes probe and allocation costs, not successful selection. |
+
+The last row is a cost-only variant under successful, stable walks. It
+is not exact resource, partial-listing, or filesystem-race equivalence.
+No allocation-count budget or universal performance parity is claimed.
+The retained guards remain in production. Mutation rejection is a
+sensitivity measurement, not a correctness proof.
+
+### Mutation selector safety
+
+Closeout found that an absolute `MUTATION_FILE` could reach the runner,
+whose path join could write outside its scratch copy. The wrapper now
+accepts only the two documented relative source paths. Unset or empty
+selectors retain the default pair. Other selectors return 2 before
+invoking the runner.
+
+`tests/mutation_selector_check.py` runs the wrapper with a temporary argv
+recorder instead of the real runner. Against the pre-guard script it
+reported 8 passed and 6 failed. Against the corrected script it reported
+14 passed and 0 failed. All eight valid argv recordings matched exactly,
+including the build and behavioral commands. No unsafe real mutation
+was run. The check now runs in `tests/verify.sh`.
+
+The reproduction, captured argv, and working-tree results are under
+`build/ignore-handover.lr3RBB/selector-guard`. This guard changes no
+mutation payload for the valid selectors used in the campaigns above.
+
+### Earlier handover evidence, 2026-10-15
+
+The handover reported `make -j8 all test`, 1000 ignore comparisons with
+seed 7 at `-j1`, 1000 with seed 42 at `-j8`, 500 ordinary comparisons
+with seed 7, and heresy-scan without findings. Those reports describe the
+pre-fix source, separately from the executed follow-up checks above.
+
+Ignore parsing has no dedicated arbitrary-byte fuzz harness. Existing
+fuzz targets cover matching and stream framing, and Cerberus remains
+bounded rather than a full ignore-walk semantics proof. Native Windows,
+exotic ABIs, git's `core.excludesFile`, and universal ripgrep compatibility
+remain outside this evidence. Malformed ignore patterns lack ripgrep's
+parse diagnostics and can behave differently. Ancestor-relative spans
+above 4095 bytes skip ancestor rules, as documented in README.
+These verification runs did not commit, push, or install anything.
+
+The final `git diff --check` was clean. Heresy-scan reported zero critical
+findings and one warning on the existing README `Runtime TODOs` link.
+That link was retained. A scoped comment audit removed nine comment lines
+without changing executable statements. Local decisions and review limits
+are in `build/ignore-handover.lr3RBB/decisions.tsv` and `review.md` there.
+The available reader tool did not expose model overrides or reader model
+identities, so a different-family review was not established.
+
 ## Unpublished 2026-10-14 review fixes verification
 
 The [review fixes](docs/PERFORMANCE.md) passed full `make verify` under
@@ -740,14 +921,15 @@ does not achieve ripgrep's selective SIMD throughput.
 
 ## Remaining feature limits
 
-Recursive traversal, regex, ignore rules, terminal formatting, and parallel
-search are absent. Detailed error wording differs from ripgrep. POSIX SIGPIPE can terminate the CLI
+Regex and terminal formatting are absent. Recursive traversal, ignore files,
+and optional parallel search are implemented. Git's `core.excludesFile` is
+not read. Detailed error wording differs from ripgrep. POSIX SIGPIPE can terminate the CLI
 rather than returning output-error status 2. Native Windows and exotic
 integer-width ABIs remain unverified.
 
 Bounded semantics passes with the private tools, but full Cerberus
 verification still exceeds the 300-second finder limit and 3 GiB streaming
-memory cap. Installed tools retain their original failures. Current receipts are in
+memory cap. Installed tools retain their original failures. Earlier receipts are in
 `/tmp/cgrep-deep-tools.rrut4W`; original reproductions are in
 `/tmp/cgrep-deep.zE6slH`. No tests or gates were weakened. Earlier file-reader
 and toolchain evidence remains in `/tmp/cgrep-resume-checks.bW2Hhj`.

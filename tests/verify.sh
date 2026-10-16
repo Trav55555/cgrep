@@ -37,6 +37,7 @@ python3 -I tests/check_receipt.py "$receipt/cli.json" fast
 python3 -I tests/fuzz_seeds.py --check
 python3 -I tests/test_receipt.py
 python3 -I tests/test_recorders.py
+python3 -I tests/mutation_selector_check.py tests/mutate.sh --root .
 python3 -I tests/framing_check.py --cutils "$CUTILS" --sensitivity
 python3 -I tests/serial_sensitivity.py --cutils "$CUTILS" --cerberus "$DCHECK_CERBERUS"
 python3 -I tests/test_parallel_benchmark.py
@@ -55,4 +56,6 @@ python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 7
 python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 42
 python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 7 --jobs 8
 python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 42 --jobs 8
+python3 -I tests/ignore_difftest.py "$BUILD/cgrep" --cases 1000 --seed 7
+python3 -I tests/ignore_difftest.py "$BUILD/cgrep" --cases 1000 --seed 42 --jobs 8
 printf 'acceptance: PASS (optional authority/regions/CBMC checks may be skipped; semantics is bounded)\n'

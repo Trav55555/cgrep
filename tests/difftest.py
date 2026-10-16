@@ -153,7 +153,7 @@ def main() -> int:
             # does; with threads ripgrep's output order varies.
             want = subprocess.run(["rg", "--no-config", "--no-mmap", "-F", "-j1", "--sort", "path", "--no-ignore"] + tail, input=stdin, capture_output=True,
                                   timeout=30, cwd=tmp, env=env)
-            got = subprocess.run([cgrep, f"-j{args.jobs}"] + tail, input=stdin, capture_output=True, timeout=30, cwd=tmp)
+            got = subprocess.run([cgrep, f"-j{args.jobs}", "--no-ignore"] + tail, input=stdin, capture_output=True, timeout=30, cwd=tmp)
             same = (want.returncode == got.returncode and want.stdout == got.stdout
                     and bool(want.stderr) == bool(got.stderr))
             if not same:

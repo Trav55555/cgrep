@@ -1,12 +1,12 @@
 # cgrep
 
 A ripgrep reimplementation in Dependable C, used to exercise c-utils with
-real file I/O and search workloads. This first slice streams literal
-searches over explicit files or standard input.
+real file I/O and search workloads. It streams literal searches over
+files, directory trees, or standard input.
 
 ```sh
 make                         # builds build/cgrep
-./build/cgrep [-cilnvw] [-j N] PATTERN [PATH...]
+./build/cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]
 printf 'one\ntwo one\n' | ./build/cgrep -n one
 ./build/cgrep -vc one a.txt b.txt  # per-file counts of lines without "one"
 ./build/cgrep -- -needle file.txt
@@ -14,11 +14,23 @@ printf 'one\ntwo one\n' | ./build/cgrep -n one
 ```
 
 With no paths, or a path of `-`, cgrep reads standard input. A directory
-argument is searched recursively, as `rg --sort path --no-ignore` does:
-each directory's names in byte order, depth first, skipping names that
-start with `.`, symbolic links (a linked argument is followed) and
-non-regular files. `.gitignore`, `.ignore` and `.rgignore` files are not
-yet honoured. A binary file found this way stops at the refill holding its
+argument is searched recursively, as `rg --sort path` does: each
+directory's names in byte order, depth first, skipping names that start
+with `.`, symbolic links (a linked argument is followed) and non-regular
+files. Ignore files apply as in ripgrep: `.rgignore`, then `.ignore`, then,
+inside a git repository (a `.git` here or above), `.gitignore`,
+`.git/info/exclude` and the global excludes file, with the deepest
+directory deciding per source, `!` lines un-ignoring (also for hidden
+names), and the files of directories above a search root applied too.
+Explicit file arguments are never filtered; `--no-ignore` turns ignore
+files off, but still skips hidden names. Unreadable ignore files are
+silently skipped, as in ripgrep. Only `$XDG_CONFIG_HOME/git/ignore` (or `~/.config/git/ignore`)
+is read as the global file: git's `core.excludesFile` setting is not.
+Backslashes are literal inside bracket classes. Malformed ignore patterns
+are not diagnosed and can behave differently from ripgrep. Ancestor rules
+are skipped when the path relative to that ancestor exceeds 4095 bytes;
+this does not limit rules read inside the search root.
+A binary file found this way stops at the refill holding its
 first NUL: earlier lines stay printed and are followed by a "stopped
 searching binary file" warning, and `-c` drops the file. An unreadable
 directory is reported and the walk continues. Multiple inputs, or any
@@ -112,8 +124,7 @@ use blocking stdio and may read ahead; immediate interactive output is not
 promised. Partial output from
 earlier windows remains visible after a later input failure.
 
-Recursive traversal, regex, ignore rules, and terminal formatting are not
-implemented.
+Regex and terminal formatting are not implemented.
 
 ## Build and verification
 
@@ -137,7 +148,9 @@ python3 -I tests/benchmark_parallel.py build/cgrep --mib 64 --repeats 7 --number
 `make verify` runs c-utils' own tests and gate, checks the CLI entry point,
 replays the framing oracle and its six output mutants, runs cgrep's deep
 checks, and checks the actual executable with I/O budgets and 3000 differential
-cases each for seeds 7 and 42. It rejects missing required checks or unexpected
+cases each for seeds 7 and 42 at `-j1` and `-j8`, plus 1000 ignore-file
+comparisons with seed 7 at `-j1` and seed 42 at `-j8`.
+It rejects missing required checks or unexpected
 skips. Authority, regions, absent CBMC proofs, and optional tcc remain outside
 the required profile; Cerberus is explicitly bounded. On Linux it creates a
 systemd user scope with a 3 GiB memory cap, no swap, reduced priority, and no
@@ -192,9 +205,18 @@ patterns, binary data, line boundaries, and larger text files around
 refill sizes. Detailed error wording, BOM decoding, and long binary-line
 refill differences are outside that generated comparison.
 
-`make mutate` uses the installed c-verification mutation runner. Each
-worker rebuilds its own copy, runs the unit tests in native, ASan/UBSan,
-and MSan builds, and then runs 150 differential cases. Defaults are two
+`make mutate` uses the installed c-verification mutation runner on
+`src/cgrep.c` and `src/ignore.inc`. Each worker rebuilds its own copy,
+runs a walk-test preflight with a 30-second runtime limit and 150 ignore-file
+comparisons, then runs the unit tests in native, ASan/UBSan, and MSan builds
+and 150 ordinary differential cases.
+
+`MUTATION_FILE=src/ignore.inc` selects a module-scoped profile: only the
+ignore-unit and walk suites run in each of those three builds, with both 150-case
+comparisons retained. The selector accepts only `src/cgrep.c` or
+`src/ignore.inc`. Other paths are rejected before the runner starts.
+Full-suite integration remains covered by `make verify`.
+Defaults are two
 workers, 30 seconds per command, a 16 MiB output-file limit, a 768 MiB
 native address-space limit, and a 512 MiB ASan RSS limit. The script sets
 the core-file limit to zero. Use an outer memory limit for aggregate worker
@@ -208,10 +230,8 @@ mutations; their reasoning is recorded in [verification.md](verification.md).
 
 ## Next slices
 
-1. Recursive traversal, hidden-file and binary defaults.
-2. A regex parser and Thompson NFA.
-3. A lazy DFA, prefilters, and benchmarks against ripgrep.
-4. Ignore rules, including `.gitignore`.
+1. A regex parser and Thompson NFA.
+2. A lazy DFA, prefilters, and benchmarks against ripgrep.
 
 See [Runtime TODOs](TODO.md) for error contracts, resource limits, scoped
 workers, bounded queues, cancellation, and concurrency verification.
