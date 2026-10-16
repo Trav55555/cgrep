@@ -404,6 +404,62 @@ static void test_selection_flags(void)
     assert(err_text[0] == '\0');
 }
 
+/* -i and -w against expected texts taken from the reference. Bytes from
+ * 0x80 are word bytes, so a non-ASCII letter blocks a word match. */
+static void test_case_and_words(void)
+{
+    static const char *const empty_word[] = {"-w", "", "@w1"};
+    static const char *const empty_word_numbered[] = {"-wn", "", "@w1"};
+    static const char *const dash[] = {"-w", "-", "@w1"};
+    static const char *const space_after[] = {"-w", "a ", "@w1"};
+    static const char *const letter[] = {"-w", "b", "@w1"};
+    static const char *const word_count[] = {"-wc", "a", "@w1"};
+    static const char *const word_invert[] = {"-wv", "a", "@w1"};
+    static const char *const folded[] = {"-i", "A B", "@w1"};
+    static const char *const folded_word[] = {"-iw", "A", "@w1"};
+    static const char *const retry[] = {"-w", "aa", "@w2"};
+    static const char *const unicode[] = {"-w", "foo", "@w3"};
+    static const char *const folded_count[] = {"-ic", "AA", "@w4"};
+    static const char *const bracket[] = {"-i", "[@", "@w5"};
+    static const char *const brace[] = {"-i", "{`", "@w5"};
+
+    write_file("w1", "a b\n\nab\n-\nx-y\na_b\n", 18);
+    write_file("w2", "xaay aa\naaa aa\naaaa\n", 20);
+    write_file("w3", "\303\251foo foo\n\303\251foo\nfoo_\n", 21);
+    write_file("w4", "aA b\nAa\nx\n", 10);
+    assert(run(NULL, 3, empty_word) == 0);
+    assert(strcmp(out_text, "\n-\n") == 0);
+    assert(run(NULL, 3, empty_word_numbered) == 0);
+    assert(strcmp(out_text, "2:\n4:-\n") == 0);
+    assert(run(NULL, 3, dash) == 0);
+    assert(strcmp(out_text, "-\n") == 0);
+    assert(run(NULL, 3, space_after) == 1 && out_text[0] == '\0');
+    assert(run(NULL, 3, letter) == 0);
+    assert(strcmp(out_text, "a b\n") == 0);
+    assert(run(NULL, 3, word_count) == 0);
+    assert(strcmp(out_text, "1\n") == 0);
+    assert(run(NULL, 3, word_invert) == 0);
+    assert(strcmp(out_text, "\nab\n-\nx-y\na_b\n") == 0);
+    assert(run(NULL, 3, folded) == 0);
+    assert(strcmp(out_text, "a b\n") == 0);
+    assert(run(NULL, 3, folded_word) == 0);
+    assert(strcmp(out_text, "a b\n") == 0);
+    /* A later candidate in the line, after earlier ones fail their bounds. */
+    assert(run(NULL, 3, retry) == 0);
+    assert(strcmp(out_text, "xaay aa\naaa aa\n") == 0);
+    assert(run(NULL, 3, unicode) == 0);
+    assert(strcmp(out_text, "\303\251foo foo\n") == 0);
+    assert(run(NULL, 3, folded_count) == 0);
+    assert(strcmp(out_text, "2\n") == 0);
+    /* '@' and '[' border A-Z: folding leaves them, in the vector path too. */
+    write_file("w5", "0123456789abcdef[@\n0123456789abcdef{`\n", 38);
+    assert(run(NULL, 3, bracket) == 0);
+    assert(strcmp(out_text, "0123456789abcdef[@\n") == 0);
+    assert(run(NULL, 3, brace) == 0);
+    assert(strcmp(out_text, "0123456789abcdef{`\n") == 0);
+    assert(err_text[0] == '\0');
+}
+
 /* Numbered lines whose prefix and body together straddle the CLI's
  * 256-byte output stage, one body longer than the stage, and a final
  * line without LF, whose newline is a separate part. */
@@ -483,6 +539,7 @@ int main(void)
     /* Under Cerberus these run in sem_flags.c, within their own time limit. */
     test_staged_output();
     test_selection_flags();
+    test_case_and_words();
 #endif
     test_boundaries_and_explicit_stdin();
     test_literal_shapes();

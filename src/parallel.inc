@@ -178,7 +178,7 @@ static int channel_write(void *context, const CuStr *parts, size_t count)
     return 1;
 }
 
-static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer)
+static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer, CuVec *scratch)
 {
     struct stat st;
     CuInput input;
@@ -216,6 +216,7 @@ static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer)
         } else {
             search = *worker->pool->search;
             search.finder = &finder;
+            search.scratch = scratch;
             search.out = NULL;
             search.write = channel_write;
             search.cancelled = worker_cancelled;
@@ -248,7 +249,9 @@ static void *worker_main(void *context)
     ParallelPool *pool;
     ParallelSlot *slot;
     CuArena arena;
+    CuArena scratch_arena;
     CuVec buffer;
+    CuVec scratch;
     SlotState terminal;
     int k;
 
@@ -256,6 +259,8 @@ static void *worker_main(void *context)
     pool = worker->pool;
     cu_arena_init(&arena);
     CU_VEC_INIT(&buffer, &arena, char);
+    cu_arena_init(&scratch_arena);
+    CU_VEC_INIT(&scratch, &scratch_arena, char);
     pool_lock(pool);
     for (k = worker->first; k < pool->count; k += pool->jobs) {
         while (worker->slots[worker->fill].state != SLOT_FREE && !pool->cancel)
@@ -266,7 +271,7 @@ static void *worker_main(void *context)
         worker->bytes = worker->slots[worker->fill].bytes;
         worker->used = 0;
         pool_unlock(pool);
-        terminal = worker_scan(worker, &buffer);
+        terminal = worker_scan(worker, &buffer, &scratch);
         pool_lock(pool);
         /* After cancellation the fill slot may not be free; publish nothing. */
         if (pool->cancel)
@@ -279,6 +284,7 @@ static void *worker_main(void *context)
         worker_signal(worker);
     }
     pool_unlock(pool);
+    cu_arena_release(&scratch_arena);
     cu_arena_release(&arena);
     return NULL;
 }

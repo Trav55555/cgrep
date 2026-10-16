@@ -1,7 +1,7 @@
 /*
  * cgrep: ripgrep reimplemented on c-utils, as c-utils' first consumer.
  *
- * Usage: cgrep [-clnv] [-j N] PATTERN [PATH...]
+ * Usage: cgrep [-cilnvw] [-j N] PATTERN [PATH...]
  *        cgrep --version
  *
  * Prints the lines containing PATTERN (a literal byte string, for now),

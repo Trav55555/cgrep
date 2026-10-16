@@ -54,7 +54,7 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-clnv] [-j N] PATTERN [PATH...]\n"
+static const char usage[] = "usage: cgrep [-cilnvw] [-j N] PATTERN [PATH...]\n"
                             "       cgrep --version\n";
 
 typedef struct {
@@ -81,12 +81,15 @@ typedef struct {
     int invert;  /* -v: select lines without a match */
     int count;   /* -c: print each input's selected-line count instead */
     int files;   /* -l: print the name of each input with a selected line */
+    int fold;    /* -i: ASCII letters match either case; literal is lowercase */
+    int word;    /* -w: a match needs a non-word byte or line end on each side */
     FILE *out;
     /* Borrowed fragments are consumed synchronously; zero stops scanning. */
     int (*write)(void *context, const CuStr *parts, size_t count);
     int (*cancelled)(void *context);
     void *context;
     Finder *finder; /* per-input filter state; NULL uses a fresh one per window */
+    CuVec *scratch; /* -i: folded copy of a printed window, owned by the caller */
 } Search;
 
 /* Options off, output to out; the caller sets the literal. */
@@ -97,11 +100,14 @@ static void search_init(Search *s, FILE *out)
     s->invert = 0;
     s->count = 0;
     s->files = 0;
+    s->fold = 0;
+    s->word = 0;
     s->out = out;
     s->write = NULL;
     s->cancelled = NULL;
     s->context = NULL;
     s->finder = NULL;
+    s->scratch = NULL;
 }
 
 /* Background byte frequency ranks: higher is more common. From the memchr
@@ -565,6 +571,123 @@ static int emit(const Search *s, const CuStr *parts, size_t count)
     return !ferror(s->out);
 }
 
+/* ASCII lowercase; other bytes are unchanged, so offsets and LFs stay put.
+ * dst may be src. Non-ASCII letters are not folded (the reference folds
+ * Unicode). */
+static void fold_ascii(char *dst, const char *src, size_t n)
+{
+    size_t i;
+#ifdef CGREP_SSE2
+    Bytes16 below;
+    Bytes16 above;
+    Bytes16 bit;
+    Bytes16 v;
+
+    below = splat16('A' - 1);
+    above = splat16('Z' + 1);
+    bit = splat16(32);
+    for (i = 0; n - i >= 16; i += 16) {
+        v = load16(src + i);
+        /* Bytes from 0x80 are negative here, so never in range. */
+        v += (Bytes16)((v > below) & (v < above)) & bit;
+        memcpy(dst + i, &v, sizeof v);
+    }
+#else
+    i = 0;
+#endif
+    for (; i < n; i++)
+        dst[i] = (char)(src[i] >= 'A' && src[i] <= 'Z' ? src[i] + 32 : src[i]);
+}
+
+/* -w word bytes: ASCII letters, digits and '_', and every byte from 0x80,
+ * which counts all non-ASCII characters as word characters (the reference
+ * classifies them with Unicode tables). LF is not a word byte. */
+static int word_byte(char c)
+{
+    unsigned char u;
+
+    u = (unsigned char)c;
+    return u >= 0x80 || u == '_' || (u >= '0' && u <= '9') || ((u | 32) >= 'a' && (u | 32) <= 'z');
+}
+
+/* hay[m, m + len) has no word byte just before or after it. Offset 0 and
+ * hay.len count as line boundaries. */
+static int word_bounded(CuStr hay, size_t m, size_t len)
+{
+    return (m == 0 || !word_byte(hay.ptr[m - 1])) &&
+           (m + len == hay.len || !word_byte(hay.ptr[m + len]));
+}
+
+/* A -w match ending at an open window's end, whose next byte is unread. */
+#define UNDECIDED ((size_t)-2)
+
+/* First match at or after pos, with -w only one bounded by non-word bytes.
+ * With open_end, hay.len is not a line end, and a match ending there is
+ * UNDECIDED (*undecided gets its start). Once a line's first candidate
+ * fails its bounds, KMP finds the rest of that line's occurrences, so
+ * total work stays linear. */
+static size_t find_selected(const Search *s, CuStr hay, size_t pos, Finder *f, int open_end,
+                            size_t *undecided)
+{
+    const Literal *literal;
+    const char *nl;
+    size_t len;
+    size_t m;
+    size_t stop;
+    size_t state;
+    size_t end;
+    size_t at;
+
+    literal = &s->literal;
+    if (!s->word)
+        return find_with(hay, pos, literal, f);
+    len = literal->text.len;
+    while (pos <= hay.len) {
+        m = len == 0 ? pos : find_with(hay, pos, literal, f);
+        if (m == NO_MATCH)
+            return NO_MATCH;
+        nl = (const char *)memchr(hay.ptr + m, '\n', hay.len - m);
+        stop = nl == NULL ? hay.len : (size_t)(nl - hay.ptr);
+        /* m and every later occurrence that ends in m's line; the KMP scan
+         * resumes after each one with its state. */
+        state = 0;
+        at = m + 1;
+        for (;;) {
+            if (open_end && m + len == hay.len) {
+                *undecided = m;
+                return UNDECIDED;
+            }
+            if (word_bounded(hay, m, len))
+                return m;
+            if (len == 0) {
+                if (m == stop)
+                    break;
+                m++;
+                continue;
+            }
+            if (len == 1) {
+                nl = (const char *)memchr(hay.ptr + m + 1, (unsigned char)literal->text.ptr[0], stop - m - 1);
+                if (nl == NULL)
+                    break;
+                m = (size_t)(nl - hay.ptr);
+                continue;
+            }
+            end = find_end(cu_str_n(hay.ptr, stop), at, literal, &state);
+            if (end == NO_MATCH)
+                break;
+            m = end - len;
+            at = end;
+        }
+        if (stop == hay.len)
+            return NO_MATCH;
+        pos = stop + 1;
+        /* After a final LF no line starts unless more may follow. */
+        if (pos == hay.len && !open_end)
+            return NO_MATCH;
+    }
+    return NO_MATCH;
+}
+
 /* How selected lines are used: printed, counted, or only detected.
  * Counting and detection stream (scan_window); printing keeps lines. */
 typedef enum { SELECT_PRINT, SELECT_COUNT, SELECT_FIRST } SelectMode;
@@ -640,11 +763,12 @@ static int print_line(const Search *s, CuStr text, size_t start, size_t stop, Pr
 }
 
 /* Selects the lines of text, a complete-line window or the final
- * unterminated tail, that match (or with -v do not). *lines counts LF
- * bytes before this window. Returns 1 if a line was selected, 0 if none,
- * -1 on an output error. SELECT_FIRST stops at the first selected line
- * without output; SELECT_PRINT prints each one. */
-static int select_text(const Search *s, const char *name, CuStr text, unsigned long *lines,
+ * unterminated tail, that match (or with -v do not). hay has text's bytes
+ * as searched (folded for -i). *lines counts LF bytes before this window.
+ * Returns 1 if a line was selected, 0 if none, -1 on an output error.
+ * SELECT_FIRST stops at the first selected line without output;
+ * SELECT_PRINT prints each one. */
+static int select_text(const Search *s, const char *name, CuStr text, CuStr hay, unsigned long *lines,
                        SelectMode mode)
 {
     Printer p;
@@ -655,6 +779,7 @@ static int select_text(const Search *s, const char *name, CuStr text, unsigned l
     size_t start;
     size_t stop;
     size_t at;
+    size_t undecided;
     const char *nl;
     int matched;
 
@@ -672,7 +797,7 @@ static int select_text(const Search *s, const char *name, CuStr text, unsigned l
     }
     pos = 0;
     while (pos < text.len) {
-        m = find_with(text, pos, &s->literal, finder);
+        m = find_selected(s, hay, pos, finder, 0, &undecided);
         /* pos is always a line's start, so the match's line starts there
          * or after it. */
         start = text.len;
@@ -802,6 +927,8 @@ static void nul_to_lf(char *p, size_t n)
 typedef struct {
     int marked;             /* the current line has a match */
     int open;               /* the current line has bytes */
+    int mid;                /* -w: the window's first byte was carried
+                             * mid-line, as context already scanned */
     unsigned long selected;
 } LineScan;
 
@@ -814,17 +941,41 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
 {
     const char *nl;
     size_t pos;
+    size_t from;
     size_t stop;
     size_t keep;
+    size_t m;
+    size_t undecided;
 
     pos = 0;
     for (;;) {
         nl = (const char *)memchr(w.ptr + pos, '\n', w.len - pos);
         stop = nl == NULL ? w.len : (size_t)(nl - w.ptr);
-        if (!ls->marked && find_with(cu_str_n(w.ptr, stop), pos, &s->literal, finder) != NO_MATCH) {
+        /* -w needs each candidate's previous byte: a carried first byte
+         * is only context. */
+        from = pos == 0 && ls->mid && s->word ? 1 : pos;
+        m = NO_MATCH;
+        if (!ls->marked && from <= stop)
+            m = find_selected(s, cu_str_n(w.ptr, stop), from, finder, nl == NULL && !at_end, &undecided);
+        if (m == UNDECIDED) {
+            /* Rescan once the next byte is read: from the byte before the
+             * candidate as context, or from its line's start. Carrying the
+             * previous line's LF would end a line twice. */
+            if (undecided > pos) {
+                *carry = w.len - (undecided - 1);
+                ls->mid = 1;
+            } else {
+                *carry = w.len - pos;
+                ls->mid = pos == 0 && ls->mid;
+            }
+            ls->open |= pos < w.len;
+            return 0;
+        }
+        if (m != NO_MATCH) {
             ls->marked = 1;
-            /* A match selects its line unless inverted: stop reading. */
-            if (!s->invert && mode == SELECT_FIRST) {
+            /* A match selects its line unless inverted: stop reading, once
+             * the line is known to exist. */
+            if (!s->invert && mode == SELECT_FIRST && (nl != NULL || pos < w.len || ls->open)) {
                 ls->selected++;
                 return 1;
             }
@@ -840,6 +991,7 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
         }
         ls->marked = 0;
         ls->open = 0;
+        ls->mid = 0;
         pos = stop + 1;
     }
     *carry = 0;
@@ -850,9 +1002,20 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
         }
         return 0;
     }
-    keep = s->literal.text.len == 0 ? 0 : s->literal.text.len - 1;
-    if (!ls->marked)
-        *carry = w.len - pos < keep ? w.len - pos : keep;
+    /* A match still to complete has fewer than len bytes here; -w also
+     * keeps the byte before it. */
+    keep = s->literal.text.len;
+    if (!s->word && keep != 0)
+        keep--;
+    if (!ls->marked) {
+        if (w.len - pos <= keep) {
+            *carry = w.len - pos;
+            ls->mid = pos == 0 && ls->mid;
+        } else {
+            *carry = keep;
+            ls->mid = 1;
+        }
+    }
     return 0;
 }
 
@@ -873,6 +1036,7 @@ static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held
 
     ls.marked = 0;
     ls.open = 0;
+    ls.mid = 0;
     ls.selected = 0;
     finder = s->finder;
     if (finder == NULL) {
@@ -921,6 +1085,8 @@ static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held
             return;
         }
         nul_to_lf(buffer->data + held, got);
+        if (s->fold)
+            fold_ascii(buffer->data + held, buffer->data + held, got);
         held += got;
         if (scan_window(s, cu_str_n(buffer->data, held), at_end, mode, finder, &ls, &carry)) {
             result->matched = 1;
@@ -935,6 +1101,23 @@ static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held
     *selected += ls.selected;
     if (ls.selected != 0)
         result->matched = 1;
+}
+
+/* The printing selection of one window, searching a folded copy for -i.
+ * -2 means the copy could not be allocated. */
+static int print_window(const Search *s, const char *name, CuStr text, unsigned long *lines)
+{
+    CuStr hay;
+
+    hay = text;
+    if (s->fold) {
+        cu_vec_clear(s->scratch);
+        if (!cu_vec_reserve(s->scratch, text.len))
+            return -2;
+        fold_ascii(s->scratch->data, text.ptr, text.len);
+        hay = cu_str_n(s->scratch->data, text.len);
+    }
+    return select_text(s, name, text, hay, lines, SELECT_PRINT);
 }
 
 static ScanResult search_stream(const Search *s, const char *name, CuInput *in, CuVec *buffer)
@@ -970,6 +1153,11 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         arena = buffer->arena;
         cu_arena_release(arena);
         CU_VEC_INIT(buffer, arena, char);
+    }
+    if (s->scratch != NULL && cu_vec_failed(s->scratch)) {
+        arena = s->scratch->arena;
+        cu_arena_release(arena);
+        CU_VEC_INIT(s->scratch, arena, char);
     }
     if (s->finder != NULL)
         finder_init(s->finder, &s->literal);
@@ -1013,9 +1201,9 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         }
         if (status == CU_INPUT_END) {
             if (old_len != 0) {
-                found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_PRINT);
+                found = print_window(s, name, cu_str_n(buffer->data, old_len), &lines);
                 if (found < 0)
-                    result.error = SCAN_OUTPUT;
+                    result.error = found == -2 ? SCAN_MEMORY : SCAN_OUTPUT;
                 else
                     result.matched |= found;
             }
@@ -1032,14 +1220,20 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             /* Earlier output stands; one more selected line only warns. */
             if (!result.matched) {
                 if (probing) {
-                    /* The full buffer is one line, ended by this NUL. */
-                    found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_FIRST);
+                    /* The full buffer is one line, ended by this NUL.
+                     * Nothing more is printed, so -i folds in place. */
+                    if (s->fold)
+                        fold_ascii(buffer->data, buffer->data, old_len);
+                    found = select_text(s, name, cu_str_n(buffer->data, old_len), cu_str_n(buffer->data, old_len),
+                                        &lines, SELECT_FIRST);
                     if (found > 0)
                         result.matched = 1;
                     else
                         scan_stream(s, in, buffer, 0, SELECT_FIRST, &total, &selected, &result);
                 } else {
                     nul_to_lf(destination, got);
+                    if (s->fold)
+                        fold_ascii(buffer->data, buffer->data, old_len + got);
                     scan_stream(s, in, buffer, old_len + got, SELECT_FIRST, &total, &selected, &result);
                 }
             }
@@ -1052,9 +1246,9 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
                 result.error = SCAN_LINE_LIMIT;
                 break;
             }
-            found = select_text(s, name, cu_str_n(buffer->data, old_len), &lines, SELECT_PRINT);
+            found = print_window(s, name, cu_str_n(buffer->data, old_len), &lines);
             if (found < 0) {
-                result.error = SCAN_OUTPUT;
+                result.error = found == -2 ? SCAN_MEMORY : SCAN_OUTPUT;
                 break;
             }
             result.matched |= found;
@@ -1071,9 +1265,9 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             end--;
         if (end == old_len)
             continue;
-        found = select_text(s, name, cu_str_n(buffer->data, end), &lines, SELECT_PRINT);
+        found = print_window(s, name, cu_str_n(buffer->data, end), &lines);
         if (found < 0) {
-            result.error = SCAN_OUTPUT;
+            result.error = found == -2 ? SCAN_MEMORY : SCAN_OUTPUT;
             break;
         }
         result.matched |= found;
@@ -1162,8 +1356,11 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     Finder finder;
     CuArena pattern_arena;
     CuArena input_arena;
+    CuArena scratch_arena;
     CuVec buffer;
+    CuVec scratch;
     CuStr pattern;
+    char *folded;
     int i;
     int r;
     int matched;
@@ -1198,6 +1395,10 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
                 s.count = 0;
             } else if (*flag == 'v') {
                 s.invert = 1;
+            } else if (*flag == 'i') {
+                s.fold = 1;
+            } else if (*flag == 'w') {
+                s.word = 1;
             } else if (*flag == 'V') {
                 fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
                 return fflush(out) != 0 || ferror(out) ? 2 : 0;
@@ -1230,6 +1431,16 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         return 2;
     }
     cu_arena_init(&pattern_arena);
+    if (s.fold && pattern.len != 0) {
+        folded = cu_arena_push_bytes(&pattern_arena, pattern.len);
+        if (folded == NULL) {
+            fputs("cgrep: out of memory preparing pattern\n", err);
+            cu_arena_release(&pattern_arena);
+            return 2;
+        }
+        fold_ascii(folded, pattern.ptr, pattern.len);
+        pattern = cu_str_n(folded, pattern.len);
+    }
     if (!literal_init(&s.literal, &pattern_arena, pattern)) {
         fputs("cgrep: out of memory preparing pattern\n", err);
         cu_arena_release(&pattern_arena);
@@ -1237,9 +1448,14 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     }
     cu_arena_init(&input_arena);
     CU_VEC_INIT(&buffer, &input_arena, char);
+    /* Its own arena: growing alternately with buffer would move both. */
+    cu_arena_init(&scratch_arena);
+    CU_VEC_INIT(&scratch, &scratch_arena, char);
+    s.scratch = &scratch;
     s.names = argc - i > 1;
     if (jobs > 1 && argc - i > 1 &&
         parallel_search(&s, argv + i, argc - i, jobs, in, out, err, &r)) {
+        cu_arena_release(&scratch_arena);
         cu_arena_release(&input_arena);
         cu_arena_release(&pattern_arena);
         return r;
@@ -1265,6 +1481,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     }
     if (fflush(out) != 0 || ferror(out))
         failed = 1;
+    cu_arena_release(&scratch_arena);
     cu_arena_release(&input_arena);
     cu_arena_release(&pattern_arena);
     return failed ? 2 : matched ? 0 : 1;

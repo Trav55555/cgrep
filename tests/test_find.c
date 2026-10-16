@@ -55,7 +55,7 @@ int cgrep_find_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 /* The printing selection the CLI runs without -c, -l or -v. */
 static int search_text(const Search *s, const char *name, CuStr text, unsigned long *lines)
 {
-    return select_text(s, name, text, lines, SELECT_PRINT);
+    return select_text(s, name, text, text, lines, SELECT_PRINT);
 }
 
 /* Streaming containment across chunks through find_end's KMP state. */
@@ -516,6 +516,83 @@ static void test_uniform_windows(void)
     }
 }
 
+/* -w matches against a naive bounded search on every small input over a
+ * word/non-word/LF alphabet, and dense rejected candidates stay linear. */
+static size_t naive_word(CuStr hay, size_t pos, CuStr needle)
+{
+    size_t m;
+
+    for (m = pos; m + needle.len <= hay.len; m++) {
+        if (memcmp(hay.ptr + m, needle.ptr, needle.len) == 0 &&
+            (m == 0 || !word_byte(hay.ptr[m - 1])) &&
+            (m + needle.len == hay.len || !word_byte(hay.ptr[m + needle.len])) &&
+            !(needle.len == 0 && m == hay.len && m > pos && hay.ptr[m - 1] == '\n'))
+            return m;
+    }
+    return NO_MATCH;
+}
+
+static void test_word_matches(void)
+{
+    static const char alphabet[] = "a -\n";
+    char hay_bytes[7];
+    char needle_bytes[3];
+    char *dense;
+    CuArena a;
+    Search s;
+    Finder f;
+    CuStr hay;
+    CuStr needle;
+    size_t n;
+    size_t m;
+    size_t i;
+    size_t hw;
+    size_t nw;
+    size_t pos;
+    size_t undecided;
+    size_t len;
+
+    cu_arena_init(&a);
+    search_init(&s, stdout);
+    s.word = 1;
+    for (m = 0; m <= 2; m++) {
+        for (nw = 0; nw < (size_t)1 << (2 * m); nw++) {
+            for (i = 0; i < m; i++)
+                needle_bytes[i] = alphabet[(nw >> (2 * i)) & 3];
+            needle = cu_str_n(needle_bytes, m);
+            if (memchr(needle.ptr, '\n', needle.len) != NULL)
+                continue;
+            assert(literal_init(&s.literal, &a, needle));
+            for (n = 0; n <= 6; n++) {
+                for (hw = 0; hw < (size_t)1 << (2 * n); hw++) {
+                    for (i = 0; i < n; i++)
+                        hay_bytes[i] = alphabet[(hw >> (2 * i)) & 3];
+                    hay = cu_str_n(hay_bytes, n);
+                    for (pos = 0; pos <= n; pos++) {
+                        if (pos != 0 && hay_bytes[pos - 1] != '\n')
+                            continue;
+                        finder_init(&f, &s.literal);
+                        assert(find_selected(&s, hay, pos, &f, 0, &undecided) == naive_word(hay, pos, needle));
+                    }
+                }
+            }
+        }
+    }
+    /* Every candidate fails its bounds: KMP finishes the line once. */
+    len = 1 << 16;
+    dense = (char *)malloc(len);
+    assert(dense != NULL);
+    memset(dense, 'a', len);
+    assert(literal_init(&s.literal, &a, CU_LIT("aaaa")));
+    finder_init(&f, &s.literal);
+    kmp_bytes = 0;
+    confirmation_bytes = 0;
+    assert(find_selected(&s, cu_str_n(dense, len), 0, &f, 0, &undecided) == NO_MATCH);
+    assert(kmp_bytes <= len && confirmation_bytes <= 4);
+    free(dense);
+    cu_arena_release(&a);
+}
+
 static void test_optional_numbering(void)
 {
     CuArena a;
@@ -577,6 +654,7 @@ int main(void)
     test_ranked_anchor();
     test_uniform_windows();
     test_optional_numbering();
+    test_word_matches();
     test_pattern_failure();
     return 0;
 }

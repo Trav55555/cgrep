@@ -6,7 +6,7 @@ searches over explicit files or standard input.
 
 ```sh
 make                         # builds build/cgrep
-./build/cgrep [-clnv] [-j N] PATTERN [PATH...]
+./build/cgrep [-cilnvw] [-j N] PATTERN [PATH...]
 printf 'one\ntwo one\n' | ./build/cgrep -n one
 ./build/cgrep -vc one a.txt b.txt  # per-file counts of lines without "one"
 ./build/cgrep -- -needle file.txt
@@ -18,7 +18,13 @@ inputs get a path prefix; `-n` adds line numbers. `-v` selects lines that
 do not match. `-c` prints each input's count of selected lines (omitting
 zero counts) and `-l` the name of each input with one (`<stdin>` for
 standard input); the later of the two wins, and `-n` does not apply to
-either. Short flags cluster (`-vn`, `-cj4`). As in ripgrep, `-c` and `-l`
+either. `-i` matches ASCII letters in either case and `-w` only matches
+with no word character just before or after (ripgrep's half boundaries).
+Two documented differences from ripgrep remain until the regex engine:
+`-i` does not fold non-ASCII letters (`é` does not match `É`), and `-w`
+treats every non-ASCII character as a word character, which is exact for
+letters but not for non-ASCII punctuation such as `—`. Short flags cluster
+(`-vn`, `-iwc`, `-cj4`). As in ripgrep, `-c` and `-l`
 treat NUL bytes as line ends and keep no lines, so the 8 MiB line limit
 does not apply to them; printing a binary input still stops at a warning.
 The status is 0 when a line is selected, 1 when none is, or 2 for a usage,

@@ -326,6 +326,53 @@ static void test_line_limit(void)
     free(bytes);
 }
 
+/* -w and -i in the streaming scan with short reads, so a candidate meets
+ * every chunk boundary, including an undecided one whose next byte is in
+ * the following read. Expected counts are the reference's. */
+static void test_streamed_words(void)
+{
+    static const char *const word_count[] = {"-wc", "aa"};
+    static const char *const word_invert[] = {"-wvc", "aa"};
+    static const char *const word_list[] = {"-wl", "aa"};
+    static const char *const empty_word[] = {"-wc", ""};
+    static const char *const empty_invert[] = {"-wvc", ""};
+    static const char *const folded[] = {"-ic", "AA"};
+    static const char *const plain_count[] = {"-c", "ab"};
+    static const size_t limits[] = {1, 2, 3, 7};
+    size_t i;
+
+    for (i = 0; i < sizeof limits / sizeof limits[0]; i++) {
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_count, "aaa aa\nxaay\naa\n", 15) == 0);
+        assert(strcmp(output_text, "2\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_invert, "aaa aa\nxaay\naa\n", 15) == 0);
+        assert(strcmp(output_text, "1\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_list, "aaa\n", 4) == 1 && output_text[0] == '\0');
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, empty_word, "a\n\n-\nb", 7) == 0);
+        assert(strcmp(output_text, "2\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, empty_invert, "a\n\n-\nb", 7) == 0);
+        assert(strcmp(output_text, "2\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, folded, "aA b\nAa\nx\n", 10) == 0);
+        assert(strcmp(output_text, "2\n") == 0);
+        /* Without -w a match may start at the carried first byte. */
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, plain_count, "xxab\nyyyab\n", 11) == 0);
+        assert(strcmp(output_text, "2\n") == 0);
+    }
+}
+
 static void test_failures(void)
 {
     static const char *const files[] = {"alpha", "@first", "@second"};
@@ -396,6 +443,7 @@ int main(void)
     test_boundaries();
     test_binary();
     test_line_limit();
+    test_streamed_words();
     test_failures();
     test_offsets();
     return 0;

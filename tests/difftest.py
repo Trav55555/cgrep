@@ -5,8 +5,9 @@
 Generates files (a small alphabet, so matches are common; empty lines, CRLF,
 missing final newlines, NUL bytes near the start of some files) and
 patterns (substrings of the corpus, single bytes, absent strings, the empty
-pattern), then runs both tools on one file, several files, -n, -v, -c, -l
-(some clustered), and standard input. stdout and the exit status must be identical; stderr must be empty
+pattern), then runs both tools on one file, several files, -n, -v, -c, -l,
+-i, -w (some clustered), and standard input. The corpus is ASCII, where
+cgrep's ASCII-only -i folding and byte-class -w words are exact. stdout and the exit status must be identical; stderr must be empty
 in both or non-empty in both. The reference uses --no-mmap because cgrep
 streams. Long binary lines, BOM/encoding conversion, and directories are
 outside this generated corpus. Four larger text inputs exercise refills.
@@ -20,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ALPHABET = b"ab c\tx-.*[]$^?+|()"
+ALPHABET = b"ab c\tx-.*[]$^?+|()AB_9"
 
 
 def make_file(rng: random.Random) -> bytes:
@@ -101,6 +102,12 @@ def main() -> int:
                 numbers += [rng.choice(["-vc", "-vl", "-cl", "-lc"])]
             elif roll < 0.36 and numbers:
                 numbers = [rng.choice(["-nv", "-vn", "-nc", "-ln"])]
+            # Case folding (with the pattern's case scrambled) and words.
+            if rng.random() < 0.15:
+                numbers += ["-i"]
+                pattern = bytes(c ^ 32 if chr(c).isalpha() and rng.random() < 0.5 else c for c in pattern)
+            if rng.random() < 0.15:
+                numbers += [rng.choice(["-w", "-wv", "-wc", "-iw"])]
             shape = rng.random()
             stdin = b""
             if shape < 0.2:

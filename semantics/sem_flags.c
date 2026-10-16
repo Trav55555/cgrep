@@ -1,5 +1,6 @@
-/* The CLI suite's output-staging and selection-flag cases, which do not fit
- * sem_cli's Cerberus time limit together with the rest of the suite. */
+/* The CLI suite's output-staging, selection-flag, case and word cases,
+ * which do not fit sem_cli's Cerberus time limit together with the rest
+ * of the suite. */
 int cgrep_native_cli_suite(void);
 #define main cgrep_native_cli_suite
 #include "../tests/test_cgrep.c"
@@ -16,6 +17,7 @@ int main(void)
     strcpy(dir, tmp);
     test_staged_output();
     test_selection_flags();
+    test_case_and_words();
     printf("sem_flags: PASS\n");
     return 0;
 }
