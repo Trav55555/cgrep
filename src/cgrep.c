@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "cu.h"
 #include "cgrep.h"
@@ -83,6 +84,8 @@ typedef struct {
     int files;   /* -l: print the name of each input with a selected line */
     int fold;    /* -i: ASCII letters match either case; literal is lowercase */
     int word;    /* -w: a match needs a non-word byte or line end on each side */
+    int walked;  /* found under a directory argument: a NUL ends the search
+                  * without a count, and only warns after printed lines */
     FILE *out;
     /* Borrowed fragments are consumed synchronously; zero stops scanning. */
     int (*write)(void *context, const CuStr *parts, size_t count);
@@ -102,6 +105,7 @@ static void search_init(Search *s, FILE *out)
     s->files = 0;
     s->fold = 0;
     s->word = 0;
+    s->walked = 0;
     s->out = out;
     s->write = NULL;
     s->cancelled = NULL;
@@ -865,8 +869,11 @@ static int add_bytes(unsigned long *total, size_t n)
 
 static int binary_warning(const Search *s, const char *name, unsigned long offset)
 {
+    const char *what;
+
+    what = s->walked ? "WARNING: stopped searching binary file after match" : "binary file matches";
     if (s->write != NULL) {
-        char warning[sizeof(unsigned long) * CHAR_BIT + 64];
+        char warning[sizeof(unsigned long) * CHAR_BIT + 96];
         CuStr parts[3];
         size_t count;
         int n;
@@ -876,13 +883,13 @@ static int binary_warning(const Search *s, const char *name, unsigned long offse
             parts[count++] = cu_str_n(name, strlen(name));
             parts[count++] = cu_str_n(": ", 2);
         }
-        n = sprintf(warning, "binary file matches (found \"\\0\" byte around offset %lu)\n", offset);
+        n = sprintf(warning, "%s (found \"\\0\" byte around offset %lu)\n", what, offset);
         parts[count++] = cu_str_n(warning, (size_t)n);
         return s->write(s->context, parts, count) ? 1 : -1;
     }
     if (s->names)
         fprintf(s->out, "%s: ", name);
-    fprintf(s->out, "binary file matches (found \"\\0\" byte around offset %lu)\n", offset);
+    fprintf(s->out, "%s (found \"\\0\" byte around offset %lu)\n", what, offset);
     return ferror(s->out) ? -1 : 1;
 }
 
@@ -974,8 +981,11 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
         if (m != NO_MATCH) {
             ls->marked = 1;
             /* A match selects its line unless inverted: stop reading, once
-             * the line is known to exist. */
-            if (!s->invert && mode == SELECT_FIRST && (nl != NULL || pos < w.len || ls->open)) {
+             * the line is known to exist. A walked file's line counts only
+             * once its end has passed the NUL check, as the reference
+             * checks each refill before searching it. */
+            if (!s->invert && mode == SELECT_FIRST &&
+                (s->walked ? nl != NULL : nl != NULL || pos < w.len || ls->open)) {
                 ls->selected++;
                 return 1;
             }
@@ -1084,6 +1094,10 @@ static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held
             result->error = SCAN_RANGE;
             return;
         }
+        /* A walked binary file is dropped, count and all, unless a listed
+         * match came first. */
+        if (s->walked && memchr(buffer->data + held, '\0', got) != NULL)
+            return;
         nul_to_lf(buffer->data + held, got);
         if (s->fold)
             fold_ascii(buffer->data + held, buffer->data + held, got);
@@ -1217,6 +1231,12 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         nul = (const char *)memchr(destination, '\0', got);
         if (nul != NULL) {
             nul_offset = read_base + (unsigned long)(nul - destination);
+            /* A walked file's search ends at this refill. */
+            if (s->walked) {
+                if (result.matched && binary_warning(s, name, nul_offset) < 0)
+                    result.error = SCAN_OUTPUT;
+                break;
+            }
             /* Earlier output stands; one more selected line only warns. */
             if (!result.matched) {
                 if (probing) {
@@ -1301,13 +1321,19 @@ static const char *scan_error(ScanResult result)
 
 /* Owned files close here; attached stdin remains open at its consumed
  * position. Keep the first failure even if close also fails. */
-static int search_input(const Search *s, const char *path, FILE *in, FILE *err, CuVec *buffer)
+static int search_input(const Search *search, const char *path, int walked, FILE *in, FILE *err,
+                        CuVec *buffer)
 {
+    Search copy;
+    const Search *s;
     CuInput input;
     ScanResult result;
     const char *name;
     int closed;
 
+    copy = *search;
+    copy.walked = walked;
+    s = &copy;
     name = path == NULL || strcmp(path, "-") == 0 ? "<stdin>" : path;
     if (name == path) {
         if (!cu_input_open(&input, path)) {
@@ -1350,6 +1376,134 @@ static int worker_count(const char *text)
     return n >= 1 && n <= 8 ? n : 0;
 }
 
+/* Inputs to search, in order: argument paths, and the files found under
+ * directory arguments, which get the reference's handling of binary files
+ * found while walking (see Search.walked). */
+typedef struct {
+    CuVec paths;  /* char *, borrowed from argv or in the walk arena */
+    CuVec walked; /* unsigned char, 1 for a path found by walking */
+} Inputs;
+
+static int entry_order(const void *a, const void *b)
+{
+    const CuDirEntry *x;
+    const CuDirEntry *y;
+    size_t n;
+    int c;
+
+    x = (const CuDirEntry *)a;
+    y = (const CuDirEntry *)b;
+    n = x->name.len < y->name.len ? x->name.len : y->name.len;
+    c = memcmp(x->name.ptr, y->name.ptr, n);
+    if (c != 0)
+        return c;
+    return x->name.len < y->name.len ? -1 : x->name.len > y->name.len;
+}
+
+static int add_input(Inputs *inputs, char *path, unsigned char walked)
+{
+    CU_VEC_PUSH(&inputs->paths, &path);
+    CU_VEC_PUSH(&inputs->walked, &walked);
+    return !cu_vec_failed(&inputs->paths) && !cu_vec_failed(&inputs->walked);
+}
+
+/* dir, then '/' unless dir already ends with one, then name. */
+static char *join_path(CuArena *a, const char *dir, CuStr name)
+{
+    size_t len;
+    size_t total;
+    size_t slash;
+    char *p;
+
+    len = strlen(dir);
+    slash = len == 0 || dir[len - 1] != '/';
+    if (!cu_size_add(len + slash, name.len, &total) || !cu_size_add(total, 1, &total))
+        return NULL;
+    p = cu_arena_push_bytes(a, total);
+    if (p == NULL)
+        return NULL;
+    memcpy(p, dir, len);
+    if (slash)
+        p[len] = '/';
+    memcpy(p + len + slash, name.ptr, name.len);
+    p[total - 1] = '\0';
+    return p;
+}
+
+/* Adds the regular files under dir, depth first with each directory's
+ * names in byte order, skipping names that start with '.', symbolic links
+ * (never followed) and other non-regular entries, as the reference does
+ * without ignore files. Reports each failure and returns 0, after adding
+ * whatever else it could. */
+static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err)
+{
+    CuDir d;
+    CuDirEntry e;
+    CuDirEntry *list;
+    CuVec entries;
+    char *path;
+    size_t count;
+    size_t i;
+    int r;
+    int ok;
+
+    if (!cu_dir_open(&d, a, dir)) {
+        fprintf(err, "cgrep: %s: %s\n", dir, cu_dir_errno(&d) == 0 ? "out of memory" : strerror(cu_dir_errno(&d)));
+        return 0;
+    }
+    ok = 1;
+    CU_VEC_INIT(&entries, a, CuDirEntry);
+    while ((r = cu_dir_next(&d, &e)) == 1) {
+        if ((e.name.len != 0 && e.name.ptr[0] == '.') || (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR))
+            continue;
+        CU_VEC_PUSH(&entries, &e);
+    }
+    if (r < 0 || cu_vec_failed(&entries)) {
+        fprintf(err, "cgrep: %s: %s\n", dir,
+                r < 0 && cu_dir_errno(&d) != 0 ? strerror(cu_dir_errno(&d)) : "out of memory");
+        ok = 0;
+    }
+    cu_dir_close(&d);
+    count = cu_vec_len(&entries);
+    list = CU_VEC_DATA(&entries, CuDirEntry);
+    if (count > 1)
+        qsort(list, count, sizeof *list, entry_order);
+    for (i = 0; i < count; i++) {
+        path = join_path(a, dir, list[i].name);
+        if (path == NULL) {
+            fprintf(err, "cgrep: %s: out of memory\n", dir);
+            return 0;
+        }
+        if (list[i].kind == CU_DIR_FILE) {
+            if (!add_input(inputs, path, 1)) {
+                fprintf(err, "cgrep: %s: out of memory\n", dir);
+                return 0;
+            }
+        } else if (!walk(a, path, inputs, err)) {
+            ok = 0;
+        }
+    }
+    return ok;
+}
+
+/* Whether path names a directory that can be listed, following symbolic
+ * links as the reference does for arguments. Anything else is opened as a
+ * file, which reports why it cannot be read (an unlistable directory
+ * fails to open with the same error). */
+static int directory_argument(const char *path)
+{
+    CuDir d;
+    CuArena probe;
+    int r;
+
+    cu_arena_init(&probe);
+    r = cu_dir_open(&d, &probe, path);
+    if (r)
+        cu_dir_close(&d);
+    cu_arena_release(&probe);
+    return r;
+}
+
 int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 {
     Search s;
@@ -1359,8 +1513,14 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     CuArena scratch_arena;
     CuVec buffer;
     CuVec scratch;
+    CuArena walk_arena;
+    Inputs inputs;
     CuStr pattern;
     char *folded;
+    char **paths;
+    unsigned char *walked;
+    int count;
+    int k;
     int i;
     int r;
     int matched;
@@ -1453,22 +1613,42 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     CU_VEC_INIT(&scratch, &scratch_arena, char);
     s.scratch = &scratch;
     s.names = argc - i > 1;
-    if (jobs > 1 && argc - i > 1 &&
-        parallel_search(&s, argv + i, argc - i, jobs, in, out, err, &r)) {
+    matched = 0;
+    failed = 0;
+    /* Directory arguments expand, in place, to the files under them. */
+    cu_arena_init(&walk_arena);
+    CU_VEC_INIT(&inputs.paths, &walk_arena, char *);
+    CU_VEC_INIT(&inputs.walked, &walk_arena, unsigned char);
+    for (k = i; k < argc; k++) {
+        r = strcmp(argv[k], "-") != 0 && directory_argument(argv[k]);
+        if (r) {
+            s.names = 1;
+            if (!walk(&walk_arena, argv[k], &inputs, err))
+                failed = 1;
+        } else if (!add_input(&inputs, argv[k], 0)) {
+            fputs("cgrep: out of memory listing inputs\n", err);
+            failed = 1;
+            break;
+        }
+    }
+    count = (int)cu_vec_len(&inputs.paths);
+    paths = CU_VEC_DATA(&inputs.paths, char *);
+    walked = CU_VEC_DATA(&inputs.walked, unsigned char);
+    if (jobs > 1 && count > 1 && cu_vec_len(&inputs.paths) <= INT_MAX &&
+        parallel_search(&s, paths, walked, count, jobs, in, out, err, &r)) {
+        cu_arena_release(&walk_arena);
         cu_arena_release(&scratch_arena);
         cu_arena_release(&input_arena);
         cu_arena_release(&pattern_arena);
-        return r;
+        return failed ? 2 : r;
     }
-    matched = 0;
-    failed = 0;
     if (i == argc) {
-        r = search_input(&s, NULL, in, err, &buffer);
+        r = search_input(&s, NULL, 0, in, err, &buffer);
         matched = r == 1;
         failed = r < 0;
     }
-    for (; i < argc; i++) {
-        r = search_input(&s, argv[i], in, err, &buffer);
+    for (k = 0; k < count; k++) {
+        r = search_input(&s, paths[k], walked[k], in, err, &buffer);
         if (r == 1)
             matched = 1;
         else if (r < 0)
@@ -1481,6 +1661,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     }
     if (fflush(out) != 0 || ferror(out))
         failed = 1;
+    cu_arena_release(&walk_arena);
     cu_arena_release(&scratch_arena);
     cu_arena_release(&input_arena);
     cu_arena_release(&pattern_arena);

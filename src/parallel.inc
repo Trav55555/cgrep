@@ -48,6 +48,7 @@ typedef struct {
     int drain; /* next slot the coordinator consumes */
     unsigned polls;
     const char *path;
+    int walked;  /* path was found under a directory argument */
     char *bytes; /* the fill slot's storage while scanning */
     size_t used;
     ScanResult result;
@@ -60,6 +61,7 @@ struct ParallelPool {
     int jobs;
     int count;
     char **paths;
+    const unsigned char *walked; /* per path, or NULL for none */
     const Search *search;
     ParallelWorker *workers; /* one per started job */
 };
@@ -217,6 +219,7 @@ static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer, CuVec *scrat
             search = *worker->pool->search;
             search.finder = &finder;
             search.scratch = scratch;
+            search.walked = worker->walked;
             search.out = NULL;
             search.write = channel_write;
             search.cancelled = worker_cancelled;
@@ -268,6 +271,7 @@ static void *worker_main(void *context)
         if (pool->cancel)
             break;
         worker->path = pool->paths[k];
+        worker->walked = pool->walked != NULL && pool->walked[k];
         worker->bytes = worker->slots[worker->fill].bytes;
         worker->used = 0;
         pool_unlock(pool);
@@ -314,8 +318,8 @@ static void pool_cancel(ParallelPool *pool, int initialized)
 }
 
 /* Not selected => caller retains the serial path. Selected => joined scope. */
-static int parallel_search(const Search *search, char **paths, int count, int jobs,
-                           FILE *in, FILE *out, FILE *err, int *status)
+static int parallel_search(const Search *search, char **paths, const unsigned char *walked, int count,
+                           int jobs, FILE *in, FILE *out, FILE *err, int *status)
 {
     ParallelPool *pool;
     ParallelWorker *worker;
@@ -356,6 +360,7 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
     pool->jobs = jobs;
     pool->count = count;
     pool->paths = paths;
+    pool->walked = walked;
     pool->search = search;
     code = pthread_mutex_init(&pool->mutex, NULL);
     if (code != 0) {
@@ -376,6 +381,7 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
         worker->drain = 0;
         worker->polls = 0;
         worker->path = NULL;
+        worker->walked = 0;
         worker->bytes = NULL;
         worker->used = 0;
         worker->result.matched = 0;
@@ -443,7 +449,7 @@ static int parallel_search(const Search *search, char **paths, int count, int jo
             }
             pool_unlock(pool);
             if (state == SLOT_SERIAL) {
-                code = search_input(search, paths[i], in, err, &serial_buffer);
+                code = search_input(search, paths[i], walked != NULL && walked[i], in, err, &serial_buffer);
                 if (code < 0)
                     failed = 1;
                 else
@@ -480,11 +486,12 @@ joined_cleanup:
     return 1;
 }
 #else
-static int parallel_search(const Search *search, char **paths, int count, int jobs,
-                           FILE *in, FILE *out, FILE *err, int *status)
+static int parallel_search(const Search *search, char **paths, const unsigned char *walked, int count,
+                           int jobs, FILE *in, FILE *out, FILE *err, int *status)
 {
     (void)search;
     (void)paths;
+    (void)walked;
     (void)count;
     (void)jobs;
     (void)in;

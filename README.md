@@ -13,8 +13,16 @@ printf 'one\ntwo one\n' | ./build/cgrep -n one
 ./build/cgrep --version       # cgrep 0.1.0 (<rev>, c-utils <rev>)
 ```
 
-With no paths, or a path of `-`, cgrep reads standard input. Multiple
-inputs get a path prefix; `-n` adds line numbers. `-v` selects lines that
+With no paths, or a path of `-`, cgrep reads standard input. A directory
+argument is searched recursively, as `rg --sort path --no-ignore` does:
+each directory's names in byte order, depth first, skipping names that
+start with `.`, symbolic links (a linked argument is followed) and
+non-regular files. `.gitignore`, `.ignore` and `.rgignore` files are not
+yet honoured. A binary file found this way stops at the refill holding its
+first NUL: earlier lines stay printed and are followed by a "stopped
+searching binary file" warning, and `-c` drops the file. An unreadable
+directory is reported and the walk continues. Multiple inputs, or any
+directory argument, get a path prefix; `-n` adds line numbers. `-v` selects lines that
 do not match. `-c` prints each input's count of selected lines (omitting
 zero counts) and `-l` the name of each input with one (`<stdin>` for
 standard input); the later of the two wins, and `-n` does not apply to

@@ -6,7 +6,9 @@ Generates files (a small alphabet, so matches are common; empty lines, CRLF,
 missing final newlines, NUL bytes near the start of some files) and
 patterns (substrings of the corpus, single bytes, absent strings, the empty
 pattern), then runs both tools on one file, several files, -n, -v, -c, -l,
--i, -w (some clustered), and standard input. The corpus is ASCII, where
+-i, -w (some clustered), directory arguments (a generated tree with
+hidden names, symlinks and nested directories; the reference runs with
+--sort path and --no-ignore), and standard input. The corpus is ASCII, where
 cgrep's ASCII-only -i folding and byte-class -w words are exact. stdout and the exit status must be identical; stderr must be empty
 in both or non-empty in both. The reference uses --no-mmap because cgrep
 streams. Long binary lines, BOM/encoding conversion, and directories are
@@ -36,6 +38,26 @@ def make_file(rng: random.Random) -> bytes:
         at = rng.randint(0, len(data))
         data = data[:at] + b"\0" + data[at:]
     return data
+
+
+def make_tree(rng: random.Random, root: Path, depth: int, files: list, dirs: list) -> None:
+    """Nested directories with hidden names, symlinks and names whose byte
+    order differs from path order (a, a-b, a.txt, A)."""
+    root.mkdir()
+    dirs.append(root)
+    names = ["a", "a-b", "a.txt", "A", "b", ".hid", "z"]
+    for name in rng.sample(names, rng.randint(4 if depth == 0 else 0, len(names))):
+        path = root / name
+        roll = rng.random()
+        if depth < 3 and roll < (0.45 if depth == 0 else 0.3):
+            make_tree(rng, path, depth + 1, files, dirs)
+        elif roll < 0.4 and files:
+            path.symlink_to(rng.choice(files).resolve())
+        elif roll < 0.45 and len(dirs) > 1:
+            path.symlink_to(rng.choice(dirs[:-1]).resolve(), target_is_directory=True)
+        else:
+            path.write_bytes(make_file(rng))
+            files.append(path)
 
 
 def make_pattern(rng: random.Random, files: list) -> bytes:
@@ -87,6 +109,10 @@ def main() -> int:
             (Path(tmp) / name).write_bytes(data)
             names.append(name)
             files.append(data)
+        tree_files = [Path(tmp) / name for name in names[:12]]
+        tree_dirs = []
+        make_tree(rng, Path(tmp) / "tree", 0, tree_files, tree_dirs)
+        roots = ["tree"] + [str(d.relative_to(tmp)) for d in tree_dirs[1:]] + ["tree/"]
         for case in range(args.cases):
             pattern = make_pattern(rng, files)
             numbers = ["-n"] if rng.random() < 0.5 else []
@@ -119,10 +145,13 @@ def main() -> int:
                 paths = rng.sample(names, rng.randint(2, 4))
                 if rng.random() < 0.1:
                     paths.append("missing.txt")
+            # Directory arguments, alone or among files.
+            if stdin == b"" and rng.random() < 0.25:
+                paths = [rng.choice(roots)] + (paths if rng.random() < 0.5 else [])
             tail = numbers + ["--", pattern.decode("latin-1")] + paths
             # -j1: one thread searches the paths in argument order, as cgrep
             # does; with threads ripgrep's output order varies.
-            want = subprocess.run(["rg", "--no-config", "--no-mmap", "-F", "-j1"] + tail, input=stdin, capture_output=True,
+            want = subprocess.run(["rg", "--no-config", "--no-mmap", "-F", "-j1", "--sort", "path", "--no-ignore"] + tail, input=stdin, capture_output=True,
                                   timeout=30, cwd=tmp, env=env)
             got = subprocess.run([cgrep, f"-j{args.jobs}"] + tail, input=stdin, capture_output=True, timeout=30, cwd=tmp)
             same = (want.returncode == got.returncode and want.stdout == got.stdout
