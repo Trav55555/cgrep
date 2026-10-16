@@ -1,17 +1,16 @@
 # Gitea acceptance CI
 
-The workflow runs full acceptance for trusted `trav` pushes to `trav/cgrep`
-`main`. It has no deployment or pull-request trigger. The repository-scoped
-`cgrep-x86_64-3g:host` runner executes on Linux x86_64. Do not expose this
-personal host runner to untrusted code. It is not a container sandbox and can
-access the runner user's home and credentials.
+The [workflow](../.gitea/workflows/ci.yml) runs full acceptance for trusted
+maintainer pushes to the configured repository's `main` branch. It has no
+deployment or pull-request trigger. Repository and actor restrictions are
+defined in the workflow.
 
-## Current setup
+The Linux x86_64 host runner is scoped to the CI repository. Match the label
+in the workflow when registering it. Do not expose this runner to untrusted
+code. It is not a container sandbox and can access the runner user's home
+and credentials.
 
-Gitea has private cgrep and dependable-c-agent-toolchain copies of their
-previously published main commits. Runner 441, `cgrep-workstation`, is
-registered only for cgrep. Its user service is `act_runner-cgrep.service`;
-the existing general Docker runner was not changed.
+## Runner setup
 
 The dedicated runner has capacity one, nice 15, a 3 GiB memory limit, no
 swap, and core dumps disabled. The workflow calls `bash ci/verify.sh`.
@@ -42,7 +41,7 @@ The CI reference is separately pinned in `reference.json`. Provision the
 approved existing Linux x86_64 ripgrep bytes offline as the runner user:
 
 ```sh
-python3 -I ci/reference.py provision --source /home/travers/.pi/agent/bin/rg
+python3 -I ci/reference.py provision --source /path/to/approved/rg
 ```
 
 This copies and validates the staged bytes before publishing
@@ -61,11 +60,11 @@ CI selection guarantee. Downstream PATH changes, especially checker-profile
 re-entry, can shadow the selection and must be verified with the real profile
 before adoption or profile updates.
 
-Runner configuration is local at `~/.config/act_runner-cgrep/config.yaml`.
-Registration credentials are not repository files. The host uses its existing
-`tea` login `trav` to read the two private dependency archives over HTTPS.
-Direct SSH clones timed out on this host. CI never copies the tea credential
-into the checkout, environment, or artifacts.
+Keep runner configuration and registration credentials outside the
+repository. Before accepting jobs, configure the `tea` login required by the
+[dependency fetcher](fetch_dependencies.py) with read access to the pinned
+dependency archives. The fetcher uses HTTPS. CI never copies the tea
+credential into the checkout, environment, or artifacts.
 
 `dependencies.json` pins both complete commit IDs and Git tree IDs.
 `fetch_dependencies.py` rejects archive links, traversal, Git metadata,
@@ -78,7 +77,7 @@ commit signatures or the identity of the Gitea operator.
 
 CI streams checks into the job log. Its temporary scratch directory contains
 logs, pinned source, and JSON receipts while the job runs. The runner removes
-that directory after completion; run 330 confirmed this cleanup behavior.
+that directory after completion.
 Do not rely on the printed scratch path for post-run evidence.
 
 The EXIT handler copies only `toolchain-selftest.log`, `acceptance.log`,
@@ -135,6 +134,6 @@ RUNNER_TEMP=/tmp/cgrep-ci-pilot bash ci/verify.sh
 Use a fresh checkout and the provisioned runner environment. Local pilots
 leave `ci-artifacts/` for inspection; another run refuses that existing path
 rather than overwriting evidence. Never run a second heavy acceptance check
-alongside it. Check `systemctl --user status act_runner-cgrep.service`
-for runner health. The service being active does not prove a workflow ran;
-verify the Gitea job log and the acceptance receipts after publishing.
+alongside it. Check your runner's service status when investigating failures.
+An active service does not prove a workflow ran. Verify the Gitea job log and
+the acceptance receipts after publishing.
