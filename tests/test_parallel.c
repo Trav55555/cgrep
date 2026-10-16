@@ -11,14 +11,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { F_NONE, F_POOL, F_WORKERS, F_MUTEX, F_COND, F_ATTR, F_STACK, F_CREATE, F_OPEN,
-       F_STAT, F_FDOPEN, F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO };
+enum { F_NONE, F_POOL, F_WORKERS, F_ARENA, F_OPEN, F_STAT, F_FDOPEN,
+       F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO };
 static int fault;
 static int allocations;
 static int creates;
 static int started_threads;
 static int joined;
+static int mutexes;
+static int destroyed_mutexes;
 static int conditions;
+static int destroyed_conditions;
+static size_t startup_attempts;
+static size_t startup_failure = (size_t)-1;
+static size_t unavailable_at = (size_t)-1;
 static const char *fault_path;
 static pthread_mutex_t race_mutex;
 static pthread_cond_t race_changed;
@@ -32,48 +38,72 @@ static void *test_alloc(size_t n)
     return malloc(n);
 }
 
-static int test_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a)
+static int unavailable(void)
 {
-    return fault == F_MUTEX ? EAGAIN : pthread_mutex_init(m, a);
+    if (startup_attempts++ == unavailable_at) {
+        errno = ENOSYS;
+        return 1;
+    }
+    return 0;
 }
 
-static int test_cond_init(pthread_cond_t *c, const pthread_condattr_t *a)
+static int test_mutex_init(CuMutex **m, CuArena *a)
 {
-    conditions++;
-    return fault == F_COND && conditions == 2 ? EAGAIN : pthread_cond_init(c, a);
+    int ok;
+
+    if (unavailable())
+        return 0;
+    if (fault == F_ARENA)
+        cu_arena_fail_at(a, a->attempts);
+    ok = cu_mutex_init(m, a);
+    if (ok)
+        mutexes++;
+    return ok;
 }
 
-static int test_attr_init(pthread_attr_t *a)
+static void test_mutex_destroy(CuMutex *m)
 {
-    return fault == F_ATTR ? EAGAIN : pthread_attr_init(a);
+    cu_mutex_destroy(m);
+    destroyed_mutexes++;
 }
 
-static int test_stack(pthread_attr_t *a, size_t n)
+static int test_cond_init(CuCond **c, CuArena *a)
 {
-    return fault == F_STACK ? EINVAL : pthread_attr_setstacksize(a, n);
+    int ok;
+
+    if (unavailable())
+        return 0;
+    ok = cu_cond_init(c, a);
+    if (ok)
+        conditions++;
+    return ok;
 }
 
-static int test_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *context)
+static void test_cond_destroy(CuCond *c)
 {
-    int r;
+    cu_cond_destroy(c);
+    destroyed_conditions++;
+}
+
+static int test_create(CuThread **t, CuArena *a, size_t stack_size,
+                       void (*fn)(void *), void *context)
+{
+    int ok;
 
     creates++;
-    if (fault == F_CREATE && creates == 2)
-        return EAGAIN;
-    r = pthread_create(t, a, fn, context);
-    if (r == 0)
+    assert(stack_size == (size_t)262144);
+    if (unavailable())
+        return 0;
+    ok = cu_thread_start(t, a, stack_size, fn, context);
+    if (ok)
         started_threads++;
-    return r;
+    return ok;
 }
 
-static int test_join(pthread_t thread, void **result)
+static void test_join(CuThread *thread)
 {
-    int r;
-
-    r = pthread_join(thread, result);
-    if (r == 0)
-        joined++;
-    return r;
+    cu_thread_join(thread);
+    joined++;
 }
 
 static int test_open(const char *path, int flags)
@@ -162,12 +192,12 @@ static int test_close(FILE *file)
  * size, with fixtures small enough for valgrind's per-test time limit. */
 #define CHANNEL_BYTES 131072
 #define CGREP_POOL_ALLOC test_alloc
-#define CGREP_THREAD_CREATE test_create
-#define pthread_join test_join
-#define pthread_mutex_init test_mutex_init
-#define pthread_cond_init test_cond_init
-#define pthread_attr_init test_attr_init
-#define pthread_attr_setstacksize test_stack
+#define cu_thread_start test_create
+#define cu_thread_join test_join
+#define cu_mutex_init test_mutex_init
+#define cu_mutex_destroy test_mutex_destroy
+#define cu_cond_init test_cond_init
+#define cu_cond_destroy test_cond_destroy
 #define open test_open
 #define fstat test_stat
 #define fdopen test_fdopen
@@ -185,11 +215,12 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
 }
 #undef cgrep_main
 #ifdef CGREP_NATIVE_PARALLEL
-#undef pthread_join
-#undef pthread_mutex_init
-#undef pthread_cond_init
-#undef pthread_attr_init
-#undef pthread_attr_setstacksize
+#undef cu_thread_start
+#undef cu_thread_join
+#undef cu_mutex_init
+#undef cu_mutex_destroy
+#undef cu_cond_init
+#undef cu_cond_destroy
 #undef open
 #undef fstat
 #undef fdopen
@@ -249,10 +280,18 @@ static int invoke(char **paths, const char *jobs, FILE *out, FILE *err)
     creates = 0;
     started_threads = 0;
     joined = 0;
+    mutexes = 0;
+    destroyed_mutexes = 0;
     conditions = 0;
+    destroyed_conditions = 0;
+    startup_attempts = 0;
+    cu_thread_fail_at(startup_failure);
     result = parallel_cli(8, args, stdin, out, err);
+    cu_thread_fail_at((size_t)-1);
     assert(descriptors() == before);
     assert(started_threads == joined);
+    assert(mutexes == destroyed_mutexes);
+    assert(conditions == destroyed_conditions);
     return result;
 }
 
@@ -313,6 +352,53 @@ static void channel_fit_cases(void)
     free(worker);
 }
 
+static void startup_cases(char **paths, FILE *expected, FILE *expected_err)
+{
+    FILE *out;
+    FILE *err;
+    FILE *wanted;
+    size_t n;
+
+    wanted = tmpfile();
+    assert(wanted != NULL);
+    assert(fprintf(wanted, "cgrep: worker startup: %s\n", strerror(EAGAIN)) > 0);
+    for (n = 0; n <= 9; n++) {
+        startup_failure = n;
+        out = tmpfile();
+        err = tmpfile();
+        assert(out != NULL && err != NULL);
+        assert(invoke(paths, "-j4", out, err) == (n < 9 ? 2 : 0));
+        assert(startup_attempts == (n < 9 ? n + 1 : 9));
+        if (n < 9) {
+            rewind(out);
+            assert(fgetc(out) == EOF);
+            same_file(err, wanted);
+            assert(started_threads == (n < 5 ? 0 : (int)(n - 5)));
+        } else {
+            assert(started_threads == 4);
+            same_file(out, expected);
+            same_file(err, expected_err);
+        }
+        assert(fclose(out) == 0 && fclose(err) == 0);
+    }
+    startup_failure = (size_t)-1;
+    assert(fclose(wanted) == 0);
+
+    for (n = 0; n < 9; n++) {
+        unavailable_at = n;
+        out = tmpfile();
+        err = tmpfile();
+        assert(out != NULL && err != NULL);
+        assert(invoke(paths, "-j4", out, err) == 0);
+        assert(startup_attempts == n + 1);
+        assert(started_threads == (n < 5 ? 0 : (int)(n - 5)));
+        same_file(out, expected);
+        same_file(err, expected_err);
+        assert(fclose(out) == 0 && fclose(err) == 0);
+    }
+    unavailable_at = (size_t)-1;
+}
+
 static void native_cases(void)
 {
     char directory[] = "/tmp/cgrep-parallel-test.XXXXXX";
@@ -364,6 +450,7 @@ static void native_cases(void)
         same_file(err, expected_err);
         assert(fclose(out) == 0 && fclose(err) == 0);
     }
+    startup_cases(paths, expected, expected_err);
     for (f = F_POOL; f <= F_CLOSE; f++) {
         fault = f;
         fault_path = paths[1];
@@ -384,12 +471,10 @@ static void native_cases(void)
             same_file(err, wanted);
             assert(fclose(wanted) == 0);
         }
-        if (f <= F_CREATE) {
+        if (f <= F_ARENA) {
             rewind(out);
             assert(fgetc(out) == EOF);
         }
-        if (f == F_CREATE)
-            assert(creates == 2);
         if (f == F_OPEN) {
             rewind(out);
             assert(fgetc(out) != EOF);

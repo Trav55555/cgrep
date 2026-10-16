@@ -61,7 +61,11 @@ turn comes. Unsupported targets stay serial. Worker `w` searches paths
 `w`, `w + N`, and so on, each with its own input window and two 1 MiB output
 slots, so it can search its next file while the coordinator writes the
 previous one. Slots are allocated only for workers actually started. The pool
-joins all started workers before returning. Regular-file reads can delay
+joins all started workers before returning. c-utils supplies threads,
+mutexes and broadcast conditions. Worker stacks are 256 KiB. The pool joins
+the workers, destroys the synchronization objects, then releases their
+arena-owned records. An unavailable thread backend falls back to serial
+search. Other startup failures report status 2. Regular-file reads can delay
 cancellation, which workers check every eighth refill. Small matching files
 can still be slower with workers; see [performance](docs/PERFORMANCE.md).
 

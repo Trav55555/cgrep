@@ -7,7 +7,6 @@
 
 #ifdef CGREP_NATIVE_PARALLEL
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -15,10 +14,6 @@
 #ifndef CGREP_POOL_ALLOC
 #define CGREP_POOL_ALLOC malloc
 #endif
-#ifndef CGREP_THREAD_CREATE
-#define CGREP_THREAD_CREATE pthread_create
-#endif
-
 #define CHANNEL_SLOTS 2
 #ifndef CHANNEL_BYTES
 #define CHANNEL_BYTES 1048576
@@ -41,8 +36,8 @@ typedef struct {
  * order holds while a worker scans one file ahead of consumption. */
 typedef struct {
     ParallelPool *pool;
-    pthread_t thread;
-    pthread_cond_t changed;
+    CuThread *thread;
+    CuCond *changed;
     int first;
     int fill;  /* worker-written slot */
     int drain; /* next slot the coordinator consumes */
@@ -56,7 +51,7 @@ typedef struct {
 } ParallelWorker;
 
 struct ParallelPool {
-    pthread_mutex_t mutex;
+    CuMutex *mutex;
     int cancel;
     int jobs;
     int count;
@@ -68,27 +63,23 @@ struct ParallelPool {
 
 static void pool_lock(ParallelPool *pool)
 {
-    if (pthread_mutex_lock(&pool->mutex) != 0)
-        abort();
+    cu_mutex_lock(pool->mutex);
 }
 
 static void pool_unlock(ParallelPool *pool)
 {
-    if (pthread_mutex_unlock(&pool->mutex) != 0)
-        abort();
+    cu_mutex_unlock(pool->mutex);
 }
 
 static void worker_wait(ParallelWorker *worker)
 {
-    if (pthread_cond_wait(&worker->changed, &worker->pool->mutex) != 0)
-        abort();
+    cu_cond_wait(worker->changed, worker->pool->mutex);
 }
 
 /* The worker and the coordinator can both wait on one condition. */
 static void worker_signal(ParallelWorker *worker)
 {
-    if (pthread_cond_broadcast(&worker->changed) != 0)
-        abort();
+    cu_cond_broadcast(worker->changed);
 }
 
 static int worker_cancelled(void *context)
@@ -246,7 +237,7 @@ static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer, CuVec *scrat
     return SLOT_DONE;
 }
 
-static void *worker_main(void *context)
+static void worker_main(void *context)
 {
     ParallelWorker *worker;
     ParallelPool *pool;
@@ -290,7 +281,6 @@ static void *worker_main(void *context)
     pool_unlock(pool);
     cu_arena_release(&scratch_arena);
     cu_arena_release(&arena);
-    return NULL;
 }
 
 /* Workers never read standard input. Other non-regular paths fall back to
@@ -324,8 +314,8 @@ static int parallel_search(const Search *search, char **paths, const unsigned ch
     ParallelPool *pool;
     ParallelWorker *worker;
     ParallelSlot *slot;
-    pthread_attr_t attributes;
     ScanResult result;
+    CuArena thread_arena;
     CuArena serial_arena;
     CuVec serial_buffer;
     int initialized;
@@ -335,7 +325,7 @@ static int parallel_search(const Search *search, char **paths, const unsigned ch
     int code;
     int matched;
     int failed;
-    int attr_ready;
+    int unavailable;
     size_t used;
     SlotState state;
 
@@ -362,17 +352,21 @@ static int parallel_search(const Search *search, char **paths, const unsigned ch
     pool->paths = paths;
     pool->walked = walked;
     pool->search = search;
-    code = pthread_mutex_init(&pool->mutex, NULL);
-    if (code != 0) {
+    cu_arena_init(&thread_arena);
+    if (!cu_mutex_init(&pool->mutex, &thread_arena)) {
+        code = errno;
+        cu_arena_release(&thread_arena);
         free(pool->workers);
         free(pool);
+        if (code == ENOSYS)
+            return 0;
         fprintf(err, "cgrep: worker startup: %s\n", strerror(code));
         *status = 2;
         return 1;
     }
     initialized = 0;
     created = 0;
-    attr_ready = 0;
+    code = 0;
     for (i = 0; i < jobs; i++) {
         worker = &pool->workers[i];
         worker->pool = pool;
@@ -391,33 +385,30 @@ static int parallel_search(const Search *search, char **paths, const unsigned ch
             worker->slots[s].state = SLOT_FREE;
             worker->slots[s].used = 0;
         }
-        code = pthread_cond_init(&worker->changed, NULL);
-        if (code != 0)
+        if (!cu_cond_init(&worker->changed, &thread_arena)) {
+            code = errno;
             break;
+        }
         initialized++;
     }
     if (code == 0) {
-        code = pthread_attr_init(&attributes);
-        attr_ready = code == 0;
-    }
-    if (code == 0)
-        code = pthread_attr_setstacksize(&attributes, (size_t)262144);
-    if (code == 0) {
         for (i = 0; i < jobs; i++) {
-            code = CGREP_THREAD_CREATE(&pool->workers[i].thread, &attributes, worker_main, &pool->workers[i]);
-            if (code != 0)
+            if (!cu_thread_start(&pool->workers[i].thread, &thread_arena,
+                                 (size_t)262144, worker_main, &pool->workers[i])) {
+                code = errno;
                 break;
+            }
             created++;
         }
     }
-    if (attr_ready)
-        pthread_attr_destroy(&attributes);
     matched = 0;
     failed = code != 0;
+    unavailable = code == ENOSYS;
     cu_arena_init(&serial_arena);
     CU_VEC_INIT(&serial_buffer, &serial_arena, char);
     if (code != 0) {
-        fprintf(err, "cgrep: worker startup: %s\n", strerror(code));
+        if (!unavailable)
+            fprintf(err, "cgrep: worker startup: %s\n", strerror(code));
     } else {
         for (i = 0; i < count; i++) {
             worker = &pool->workers[i % jobs];
@@ -470,16 +461,17 @@ static int parallel_search(const Search *search, char **paths, const unsigned ch
     }
 joined_cleanup:
     pool_cancel(pool, initialized);
-    for (i = 0; i < created; i++) {
-        if (pthread_join(pool->workers[i].thread, NULL) != 0)
-            abort();
-    }
+    for (i = 0; i < created; i++)
+        cu_thread_join(pool->workers[i].thread);
     for (i = 0; i < initialized; i++)
-        pthread_cond_destroy(&pool->workers[i].changed);
-    pthread_mutex_destroy(&pool->mutex);
+        cu_cond_destroy(pool->workers[i].changed);
+    cu_mutex_destroy(pool->mutex);
+    cu_arena_release(&thread_arena);
     cu_arena_release(&serial_arena);
     free(pool->workers);
     free(pool);
+    if (unavailable)
+        return 0;
     if (fflush(out) != 0 || ferror(out))
         failed = 1;
     *status = failed ? 2 : matched ? 0 : 1;

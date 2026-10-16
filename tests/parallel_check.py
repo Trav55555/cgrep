@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 
@@ -32,7 +33,11 @@ def run(binary, sanitizer, reject=None):
         if reject == "hang":
             return
         raise
-    if reject:
+    if reject == "lifetime":
+        if result.returncode == 0 or not (result.returncode == -signal.SIGABRT or
+                b"Assertion" in result.stderr or b"heap-use-after-free" in result.stderr):
+            raise RuntimeError(f"compiled mutant missed its lifetime sensor: {result!r}")
+    elif reject:
         if result.returncode == 0 or b"Assertion" not in result.stderr:
             raise RuntimeError(f"compiled mutant missed its assertion sensor: {result!r}")
     elif result.returncode != 0 or result.stderr or b"test_parallel: native PASS" not in result.stdout:
@@ -80,6 +85,18 @@ def main():
             ("parallel.inc", "lost-input-status", 'fprintf(err, "cgrep: %s: %s\\n", paths[i], scan_error(result));\n                    failed = 1;',
              'fprintf(err, "cgrep: %s: %s\\n", paths[i], scan_error(result));\n                    failed = 0;', "assert"),
             ("parallel.inc", "missing-cancel", "    pool_cancel(pool, initialized);", "    if (0) pool_cancel(pool, initialized);", "hang"),
+            ("parallel.inc", "missing-join", "        cu_thread_join(pool->workers[i].thread);",
+             "        if (0) cu_thread_join(pool->workers[i].thread);", "lifetime"),
+            ("parallel.inc", "missing-condition-destroy", "        cu_cond_destroy(pool->workers[i].changed);",
+             "        if (0) cu_cond_destroy(pool->workers[i].changed);", "assert"),
+            ("parallel.inc", "missing-mutex-destroy", "    cu_mutex_destroy(pool->mutex);",
+             "    if (0) cu_mutex_destroy(pool->mutex);", "assert"),
+            ("parallel.inc", "lost-startup-status", "    failed = code != 0;",
+             "    failed = 0;", "assert"),
+            ("parallel.inc", "lost-serial-fallback", "    if (unavailable)\n        return 0;",
+             "    if (0 && unavailable)\n        return 0;", "assert"),
+            ("parallel.inc", "wrong-worker-stack", "(size_t)262144, worker_main,",
+             "(size_t)524288, worker_main,", "assert"),
             ("cgrep.c", "wrong-body-fragment",
              "parts[part_count++] = cu_str_n(text.ptr + start, output_len);",
              "parts[part_count++] = cu_str_n(text.ptr + start, output_len - 1);", "assert"),
