@@ -35,8 +35,31 @@ CI result. Check the job for the published commit separately. See
 Provision the existing dependable-c-agent-toolchain checker profile before
 accepting jobs. CI calls `dcheck-tools check`; it will not install replacement
 checkers or fall back to defective global versions. Required compiler,
-Python, git, `tea`, zig, wasmtime, clang tooling, ripgrep, GNU grep, and user
+Python, git, `tea`, zig, wasmtime, clang tooling, GNU grep, and user
 systemd commands must remain on the runner's PATH.
+
+The CI reference is separately pinned in `reference.json`. Provision the
+approved existing Linux x86_64 ripgrep bytes offline as the runner user:
+
+```sh
+python3 -I ci/reference.py provision --source /home/travers/.pi/agent/bin/rg
+```
+
+This copies and validates the staged bytes before publishing
+`~/.local/opt/cgrep-reference/<sha256>/bin/rg`. The source path records
+provenance, not a runtime dependency. Repeating healthy provisioning is safe.
+CI uses `reference.py exec --` around the existing timed acceptance pipeline,
+logs the identity and hash, and prepends the validated absolute bin directory
+to the child PATH. Missing, corrupt, or wrong-version installations fail;
+there is no ambient-rg fallback, download, or automatic repair.
+
+For recovery, inspect the reported cache path and move a corrupt entry aside
+before explicitly provisioning again. The wrapper never overwrites it.
+`--cache-root DIRECTORY` on either action supports isolated tests without
+changing the default installation. Direct local `make verify` is outside this
+CI selection guarantee. Downstream PATH changes, especially checker-profile
+re-entry, can shadow the selection and must be verified with the real profile
+before adoption or profile updates.
 
 Runner configuration is local at `~/.config/act_runner-cgrep/config.yaml`.
 Registration credentials are not repository files. The host uses its existing
