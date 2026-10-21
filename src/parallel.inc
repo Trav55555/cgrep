@@ -8,7 +8,6 @@
 #ifdef CGREP_NATIVE_PARALLEL
 #include <fcntl.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef CGREP_POOL_ALLOC
@@ -173,7 +172,7 @@ static int channel_write(void *context, const CuStr *parts, size_t count)
 
 static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer, CuVec *scratch)
 {
-    struct stat st;
+    CuFileInfo info;
     CuInput input;
     FILE *file;
     Search search;
@@ -191,12 +190,12 @@ static SlotState worker_scan(ParallelWorker *worker, CuVec *buffer, CuVec *scrat
     if (fd < 0) {
         result.error = SCAN_IO;
         result.system_error = errno;
-    } else if (fstat(fd, &st) != 0) {
+    } else if (cu_fd_info(fd, &info) != CU_INFO_OK) {
         saved = errno;
         close(fd);
         result.error = SCAN_IO;
         result.system_error = saved;
-    } else if (!S_ISREG(st.st_mode)) {
+    } else if (info.kind != CU_DIR_FILE) {
         close(fd);
         return SLOT_SERIAL;
     } else {

@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 enum { F_NONE, F_POOL, F_WORKERS, F_ARENA, F_OPEN, F_STAT, F_FDOPEN,
-       F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO };
+       F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO, F_REPLACE };
 static int fault;
 static int allocations;
 static int creates;
@@ -108,6 +108,8 @@ static void test_join(CuThread *thread)
 
 static int test_open(const char *path, int flags)
 {
+    int fd;
+
     if (fault == F_FIFO && strcmp(path, fault_path) != 0) {
         assert(pthread_mutex_lock(&race_mutex) == 0);
         while (!race_ready)
@@ -130,16 +132,21 @@ static int test_open(const char *path, int flags)
             assert(pthread_mutex_unlock(&race_mutex) == 0);
         }
     }
-    return open(path, flags);
+    fd = open(path, flags);
+    if (fd >= 0 && fault == F_REPLACE && fault_path != NULL && strcmp(path, fault_path) == 0) {
+        assert(unlink(path) == 0);
+        assert(mkdir(path, 0700) == 0);
+    }
+    return fd;
 }
 
-static int test_stat(int fd, struct stat *st)
+static CuInfoResult test_stat(int fd, CuFileInfo *info)
 {
     if (fault == F_STAT) {
         errno = EIO;
-        return -1;
+        return CU_INFO_ERROR;
     }
-    return fstat(fd, st);
+    return cu_fd_info(fd, info);
 }
 
 static FILE *test_fdopen(int fd, const char *mode)
@@ -199,7 +206,7 @@ static int test_close(FILE *file)
 #define cu_cond_init test_cond_init
 #define cu_cond_destroy test_cond_destroy
 #define open test_open
-#define fstat test_stat
+#define cu_fd_info test_stat
 #define fdopen test_fdopen
 #define cu_vec_reserve test_reserve
 #define cu_input_read test_read
@@ -222,7 +229,7 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
 #undef cu_cond_init
 #undef cu_cond_destroy
 #undef open
-#undef fstat
+#undef cu_fd_info
 #undef fdopen
 #undef cu_vec_reserve
 #undef cu_input_read
@@ -451,6 +458,20 @@ static void native_cases(void)
         assert(fclose(out) == 0 && fclose(err) == 0);
     }
     startup_cases(paths, expected, expected_err);
+    /* The name becomes a directory after open. Classification and scanning
+     * must still use the original open file, never the replaced pathname. */
+    fault = F_REPLACE;
+    fault_path = paths[1];
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, "-j4", out, err) == 0);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    assert(rmdir(paths[1]) == 0);
+    write_fixture(paths[1], 0);
+    fault = F_NONE;
     for (f = F_POOL; f <= F_CLOSE; f++) {
         fault = f;
         fault_path = paths[1];
@@ -460,7 +481,7 @@ static void native_cases(void)
         assert(invoke(paths, "-j4", out, err) == 2);
         rewind(err);
         assert(fgetc(err) != EOF);
-        if (f == F_READ || f == F_CLOSE) {
+        if (f == F_STAT || f == F_READ || f == F_CLOSE) {
             FILE *wanted;
             int j;
 
