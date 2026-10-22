@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read pinned c-utils revision
+        id: pin
+        run: |
+          python3 -I - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          print('revision=' + json.loads(Path('ci/dependencies.json').read_text())['c-utils']['revision'])
+          PYTHON
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Trav55555/c-utils
+          ref: ${{ steps.pin.outputs.revision }}
+          path: c-utils
+          persist-credentials: false
+
+      - name: Install pinned ripgrep
+        run: |
+          set -euo pipefail
+          archive=ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz
+          base=https://github.com/BurntSushi/ripgrep/releases/download/15.2.0
+          work=$(mktemp -d)
+          curl --fail --location "$base/$archive" -o "$work/$archive"
+          curl --fail --location "$base/$archive.sha256" -o "$work/$archive.sha256"
+          (cd "$work" && sha256sum --check "$archive.sha256")
+          tar -xzf "$work/$archive" -C "$work"
+          binary="$work/${archive%.tar.gz}/rg"
+          python3 -I - "$binary" <<'PYTHON'
+          import hashlib, json, sys
+          from pathlib import Path
+          expected = json.loads(Path('ci/reference.json').read_text())['sha256']
+          actual = hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'rg binary sha256 mismatch: {actual} != {expected}')
+          PYTHON
+          echo "$(dirname "$binary")" >> "$GITHUB_PATH"
+
+      - name: Build and test
+        run: |
+          make CUTILS=c-utils all test bench-test
+          python3 -I tests/difftest.py build/cgrep
+          python3 -I tests/ignore_difftest.py build/cgrep --cases 400
+
+      - name: Benchmark and render results
+        run: |
+          python3 -I tests/benchmark_tree.py build/cgrep --rg "$(command -v rg)" --output build/bench
+          python3 -I tests/render_bench.py --report build/bench/report.json \
+            --out build/bench-site --commit "$GITHUB_SHA" \
+            --runner "GitHub-hosted ubuntu-24.04 runner, $(nproc) CPUs"
+          cp build/bench/report.json build/bench-site/report.json
+          cat build/bench-site/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-site
+          path: build/bench-site/
+          if-no-files-found: error
+
+  publish-bench:
+    # Only main updates the README widget; PRs report results in their job summary.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test-and-bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-bench
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bench-site
+          path: site
+
+      - name: Commit results to the bench-results branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          git -C "$work" init -q -b bench-results
+          git -C "$work" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git -C "$work" fetch -q --depth 1 origin bench-results; then
+            git -C "$work" checkout -q -B bench-results FETCH_HEAD
+          fi
+          cp site/bench.svg site/badge.json site/summary.md site/report.json "$work/"
+          python3 -I - "$work" <<'EOF'
+          import json, os, sys
+          from pathlib import Path
+          work = Path(sys.argv[1])
+          badge = json.loads((work / 'badge.json').read_text())
+          entry = {'commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+                   'cgrep_vs_rg': badge['message']}
+          with open(work / 'history.jsonl', 'a') as history:
+              history.write(json.dumps(entry) + '\n')
+          EOF
+          git -C "$work" add -A
+          git -C "$work" -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "bench: ${GITHUB_SHA::7}"
+          git -C "$work" push -q origin bench-results

@@ -1,5 +1,8 @@
 # cgrep
 
+[![CI](https://github.com/Trav55555/cgrep/actions/workflows/ci.yml/badge.svg)](https://github.com/Trav55555/cgrep/actions/workflows/ci.yml)
+[![cgrep vs rg](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Trav55555/cgrep/bench-results/badge.json)](https://github.com/Trav55555/cgrep/tree/bench-results)
+
 Streaming literal-text search in Dependable C. Search files, walk directory
 trees, or filter standard input without loading whole files into memory.
 The project exercises [c-utils](https://github.com/Trav55555/c-utils) with
@@ -458,3 +461,13 @@ and executable remain `cgrep`.
 
 See [runtime tasks](TODO.md) for error contracts, resource limits, scoped
 workers, bounded queues, cancellation, and concurrency verification.
+
+## Benchmark
+
+![cgrep vs rg tree search benchmark](https://raw.githubusercontent.com/Trav55555/cgrep/bench-results/bench.svg)
+
+The benchmark searches generated wide, many-directory, and mixed-size trees, including the directory walk.
+Before timing, it validates cgrep output byte for byte against sorted ripgrep output and checks unordered ripgrep output as a multiset of lines.
+It compares one thread and each tool's default threads using warm-cache median wall times, including process startup.
+Shared runners are noisy: compare ratios across runs rather than absolute times.
+Reports and history live on the [bench-results branch](https://github.com/Trav55555/cgrep/tree/bench-results).
