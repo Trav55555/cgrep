@@ -140,11 +140,15 @@ highest first:
 1. `.rgignore`
 2. `.ignore`
 3. `.gitignore`
-4. `.git/info/exclude`
+4. `info/exclude`
 5. The global Git excludes file
 
 The last three apply only inside a Git repository, identified by a `.git`
-entry here or above. Within each source kind, deeper directories take
+entry here or above. `info/exclude` is read where Git reads it: in `.git`,
+or for a `.git` file (a linked worktree or submodule) in the Git directory
+its `gitdir:` line names, or that directory's `commondir`. A relative path
+there is taken from the file's own directory; ripgrep 15.2 takes it from
+its working directory and reads no exclude file without a `commondir`. Within each source kind, deeper directories take
 precedence. Ancestor ignore files above the search root also apply.
 
 `!` rules can unignore paths, including hidden names. Otherwise, discovered

@@ -1,6 +1,6 @@
 /* Ignore files for directory walks, as the reference applies them by
  * default: .rgignore, .ignore and, inside a git repository, .gitignore,
- * .git/info/exclude and the global excludes file. Included by cgrep.c.
+ * info/exclude and the global excludes file. Included by cgrep.c.
  *
  * Each directory's files are tried from the deepest directory outward; per
  * source the deepest matching rule decides, and the sources rank
@@ -12,7 +12,11 @@
  * Directories above a search root are read too. Their rules see the
  * root's path below them plus the full path below the search root.
  * The global file is matched against the path as walked; core.excludesFile is not read, so
- * only $XDG_CONFIG_HOME/git/ignore or ~/.config/git/ignore is. */
+ * only $XDG_CONFIG_HOME/git/ignore or ~/.config/git/ignore is.
+ *
+ * info/exclude follows a .git file to its git directory, as git does;
+ * the reference takes a relative gitdir from its working directory and
+ * reads no exclude file when there is no commondir. */
 
 #if !defined(__cerb__) && (defined(__unix__) || defined(__wasi__))
 #include <unistd.h>
@@ -361,29 +365,91 @@ static int parse_ignore(CuArena *a, CuStr text, IgnoreFile *f)
     return !cu_vec_failed(&rules);
 }
 
-/* Reads dir/name into f; a missing or unreadable file has no rules. */
-static int read_ignore(CuArena *a, const char *dir, const char *name, IgnoreFile *f)
+/* Reads path into f; a missing or unreadable file has no rules. */
+static int read_ignore_file(CuArena *a, const char *path, IgnoreFile *f)
 {
     CuStr text;
-    char *path;
 
     f->rules = NULL;
     f->count = 0;
-    path = join_path(a, dir, cu_str_cstr(name));
-    if (path == NULL)
-        return 0;
     if (!cu_file_read(a, path, &text))
         return !cu_arena_failed(a);
     return parse_ignore(a, text, f);
 }
 
-static const char *const ignore_names[IG_KINDS] = {".rgignore", ".ignore", ".gitignore", ".git/info/exclude"};
+/* Reads dir/name into f, as read_ignore_file. */
+static int read_ignore(CuArena *a, const char *dir, const char *name, IgnoreFile *f)
+{
+    char *path;
+
+    f->rules = NULL;
+    f->count = 0;
+    path = join_path(a, dir, cu_str_cstr(name));
+    return path != NULL && read_ignore_file(a, path, f);
+}
+
+static const char *const ignore_names[IG_EXCLUDE] = {".rgignore", ".ignore", ".gitignore"};
+
+/* Git's reading of a .git file or commondir: trailing line ends go, and a
+ * relative path is taken from base. */
+static char *git_path(CuArena *a, const char *base, CuStr text)
+{
+    char *p;
+
+    while (text.len != 0 && (text.ptr[text.len - 1] == '\n' || text.ptr[text.len - 1] == '\r'))
+        text.len--;
+    if (text.len == 0 || text.ptr[0] != '/')
+        return join_path(a, base, text);
+    p = cu_arena_push_bytes(a, text.len + 1);
+    if (p != NULL) {
+        memcpy(p, text.ptr, text.len);
+        p[text.len] = '\0';
+    }
+    return p;
+}
+
+/* Where git reads info/exclude for the repository in dir. The git
+ * directory is .git itself or, for a .git file (linked worktrees,
+ * submodules), its "gitdir: " target; a commondir file there names the
+ * directory linked worktrees share. A .git file without a gitdir line has
+ * none (*out NULL). Returns 0 only when out of memory. */
+static int exclude_path(CuArena *a, const char *dir, char **out)
+{
+    CuStr text;
+    char *git;
+    char *path;
+
+    *out = NULL;
+    git = join_path(a, dir, cu_str_cstr(".git"));
+    if (git == NULL)
+        return 0;
+    /* Reading a directory fails, leaving git as it is. */
+    if (cu_file_read(a, git, &text)) {
+        if (text.len < 8 || memcmp(text.ptr, "gitdir: ", 8) != 0)
+            return 1;
+        text.ptr += 8;
+        text.len -= 8;
+        git = git_path(a, dir, text);
+    } else if (cu_arena_failed(a)) {
+        return 0;
+    }
+    path = git == NULL ? NULL : join_path(a, git, cu_str_cstr("commondir"));
+    if (path == NULL)
+        return 0;
+    if (cu_file_read(a, path, &text))
+        git = git_path(a, git, text);
+    else if (cu_arena_failed(a))
+        return 0;
+    *out = git == NULL ? NULL : join_path(a, git, cu_str_cstr("info/exclude"));
+    return *out != NULL;
+}
 
 /* Pushes dir's ignore files; listed says which names it holds (bits by
  * kind, and 1 << IG_KINDS for .git). above dirs pass root_below. */
 static int push_ignore_dir(IgnoreStack *st, const char *dir, unsigned listed, int above, const char *root_below)
 {
     IgnoreDir d;
+    char *path;
     int k;
 
     d.has_git = (listed >> IG_KINDS) & 1;
@@ -393,7 +459,11 @@ static int push_ignore_dir(IgnoreStack *st, const char *dir, unsigned listed, in
     for (k = 0; k < IG_KINDS; k++) {
         d.files[k].rules = NULL;
         d.files[k].count = 0;
-        if (k == IG_EXCLUDE ? d.has_git != 0 : ((listed >> k) & 1u) != 0) {
+        if (k == IG_EXCLUDE) {
+            if (d.has_git != 0 && (!exclude_path(st->arena, dir, &path) ||
+                                   (path != NULL && !read_ignore_file(st->arena, path, &d.files[k]))))
+                return 0;
+        } else if (((listed >> k) & 1u) != 0) {
             if (!read_ignore(st->arena, dir, ignore_names[k], &d.files[k]))
                 return 0;
         }

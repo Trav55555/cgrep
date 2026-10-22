@@ -4,9 +4,9 @@
 
 Each case builds a small tree under /var/tmp (disk, and outside any git
 repository, unlike /tmp here) with random .gitignore, .ignore, .rgignore,
-.git/info/exclude and global excludes files, sometimes a .git at the root
-or deeper, and searches it from its root, a subdirectory or a parent, as a
-path or from inside it. Both tools list matching files (-l) with HOME and
+info/exclude and global excludes files, sometimes a .git at the root or
+deeper (at the root, sometimes a linked worktree's .git file), and searches
+it from its root, a subdirectory or a parent, as a path or from inside it. Both tools list matching files (-l) with HOME and
 XDG_CONFIG_HOME pointing into the case, so only its own global file
 applies. stdout and the exit status must match; stderr must be empty in
 both or non-empty in both. The reference runs with --sort path.
@@ -96,9 +96,20 @@ def main() -> int:
             make_tree(rng, top / "r", 0, dirs)
             if rng.random() < 0.6:
                 git = rng.choice([top, top / "r"])
-                (git / ".git" / "info").mkdir(parents=True, exist_ok=True)
+                info = git / ".git" / "info"
+                if rng.random() < 0.3:
+                    # A linked worktree: its .git file names a git directory
+                    # whose commondir holds info/exclude. The reference takes
+                    # a relative gitdir from its own working directory, so
+                    # only absolute ones are compared.
+                    gitdir = base / "main.git" / "worktrees" / "w"
+                    gitdir.mkdir(parents=True)
+                    (gitdir / "commondir").write_text("../..\n")
+                    (git / ".git").write_text(f"gitdir: {gitdir}\n")
+                    info = base / "main.git" / "info"
+                info.mkdir(parents=True, exist_ok=True)
                 if rng.random() < 0.4:
-                    (git / ".git" / "info" / "exclude").write_text(make_ignore(rng))
+                    (info / "exclude").write_text(make_ignore(rng))
             start = rng.choice(dirs)
             shape = rng.random()
             if shape < 0.4:
