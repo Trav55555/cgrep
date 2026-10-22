@@ -249,27 +249,37 @@ static int glob_path(const char *g, size_t gl, const char *p, size_t pl, unsigne
 }
 
 /* 1 if rel is ignored, -1 if un-ignored, 0 if no line matches (or w
- * failed): the last matching line of f decides. Unanchored lines match any
- * final run of components, as "**" + "/" + line. */
+ * failed): the last matching line of f decides. An unanchored line is one
+ * component (parse_ignore anchors any glob with a '/'), so it can match
+ * only the final component of rel, which it sees alone. */
 static int file_verdict(const IgnoreFile *f, const char *rel, size_t len, int is_dir, IgnoreWork *w)
 {
     const IgnoreRule *r;
+    const char *base;
+    size_t base_len;
     size_t i;
-    size_t at;
     int matched;
 
+    base = NULL;
+    base_len = 0;
     for (i = f->count; i-- != 0;) {
         if (!ignore_charge(w, 1))
             return 0;
         r = &f->rules[i];
         if (r->dir_only && !is_dir)
             continue;
-        matched = glob_path(r->glob, r->len, rel, len, 0, w);
-        for (at = 0; !matched && !r->anchored && at < len; at++) {
-            if (!ignore_charge(w, 1))
-                return 0;
-            if (rel[at] == '/')
-                matched = glob_path(r->glob, r->len, rel + at + 1, len - at - 1, 0, w);
+        if (r->anchored) {
+            matched = glob_path(r->glob, r->len, rel, len, 0, w);
+        } else {
+            if (base == NULL) {
+                base = rel + len;
+                while (base != rel && base[-1] != '/')
+                    base--;
+                base_len = (size_t)(rel + len - base);
+                if (!ignore_charge(w, base_len + 1))
+                    return 0;
+            }
+            matched = glob_path(r->glob, r->len, base, base_len, 0, w);
         }
         if (w->failed)
             return 0;
@@ -401,6 +411,18 @@ static unsigned ignore_listing_bit(CuStr name)
     return 0;
 }
 
+/* Whether d holds no rules at all: then it cannot decide a verdict. */
+static int ignore_dir_empty(const IgnoreDir *d)
+{
+    int k;
+
+    for (k = 0; k < IG_KINDS; k++) {
+        if (d->files[k].count != 0)
+            return 0;
+    }
+    return 1;
+}
+
 /* The verdict for path (as walked, ending in its name) under the stack:
  * 1 ignored, -1 un-ignored, 0 neither. When the rules exceed the work
  * limit there is none: 0, with *error set to say why; else *error is NULL. */
@@ -438,6 +460,11 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
     below_len = strlen(below);
     for (i = n; i-- != 0;) {
         d = &dirs[i];
+        /* Most directories have no rules; only their .git entry counts. */
+        if (ignore_dir_empty(d)) {
+            saw_git |= d->has_git;
+            continue;
+        }
         if (d->above) {
             len = strlen(d->root_below);
             if (len + 1 + below_len >= sizeof relative_path)
@@ -452,9 +479,12 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
             rel = path + len + (len != 0 && d->path[len - 1] != '/');
             len = strlen(rel);
         }
-        for (k = 0; k < IG_KINDS; k++) {
-            if (m[k] == 0 && (k < IG_GIT || (any_git && !saw_git)))
-                m[k] = file_verdict(&d->files[k], rel, len, is_dir, &work);
+        /* Consulting a directory costs its relative path. */
+        if (ignore_charge(&work, len + 1)) {
+            for (k = 0; k < IG_KINDS; k++) {
+                if (m[k] == 0 && (k < IG_GIT || (any_git && !saw_git)))
+                    m[k] = file_verdict(&d->files[k], rel, len, is_dir, &work);
+            }
         }
         if (work.failed) {
             *error = ignore_overrun;

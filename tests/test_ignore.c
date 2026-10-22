@@ -205,6 +205,87 @@ static void trailing_space(void)
     cu_arena_release(&a);
 }
 
+/* An unanchored rule is one component (a glob with '/' is anchored), so
+ * only the final component can match it: it is matched there once, not
+ * retried at every '/' of a long path. */
+static void final_component(void)
+{
+    CuArena a;
+    IgnoreFile f;
+    char *path;
+
+    cu_arena_init(&a);
+    path = repeated("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/",
+        200, "f");
+    assert(parse_ignore(&a, cu_str_cstr("zzz\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("x*\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("f\n"), &f));
+    assert(verdict(&f, path, 0) == 1 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("*\n"), &f));
+    assert(verdict(&f, path, 0) == 1 && !work.failed);
+    free(path);
+    /* As before: the final component, whole; "**" alone matches all. */
+    assert(parse_ignore(&a, cu_str_cstr("b\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "a/b/c", 0) == 0 && verdict(&f, "a/bb", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 0 && verdict(&f, "b/a", 0) == 1 && verdict(&f, "a", 0) == 1);
+    assert(parse_ignore(&a, cu_str_cstr("**\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "a", 0) == 1);
+    assert(parse_ignore(&a, cu_str_cstr("b/\n"), &f));
+    assert(verdict(&f, "a/b", 1) == 1 && verdict(&f, "a/b", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a/b\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "x/a/b", 0) == 0);
+    cu_arena_release(&a);
+}
+
+/* Directories whose ignore files hold no rules take no part in a verdict,
+ * so thousands of them, above or below the root, cost nothing. One with
+ * a .git entry still bounds the git sources above it. */
+static void empty_frames(void)
+{
+    CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
+    const char *error;
+    size_t i;
+
+    cu_arena_init(&a);
+    init_stack(&st, &a, "r");
+    init_dir(&d, "/home", 0);
+    d.above = 1;
+    d.root_below = "r";
+    for (i = 0; i < 20000; i++)
+        CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r", 1);
+    assert(parse_ignore(&a, cu_str_cstr("*.log\n!keep.log\n"), &d.files[IG_GIT]));
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r/s", 0);
+    for (i = 0; i < 20000; i++)
+        CU_VEC_PUSH(&st.dirs, &d);
+    assert(!cu_vec_failed(&st.dirs));
+    assert(ignore_verdict(&st, "r/s/x.log", 0, &error) == 1 && error == NULL);
+    assert(ignore_verdict(&st, "r/s/keep.log", 0, &error) == -1 && error == NULL);
+    assert(ignore_verdict(&st, "r/s/x.txt", 0, &error) == 0 && error == NULL);
+    cu_arena_release(&a);
+    cu_arena_init(&a);
+    init_stack(&st, &a, "r");
+    init_dir(&d, "/", 0);
+    d.above = 1;
+    d.root_below = "home/r";
+    assert(parse_ignore(&a, cu_str_cstr("*.log\n"), &d.files[IG_GIT]));
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "/home", 1);
+    d.above = 1;
+    d.root_below = "r";
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r", 0);
+    CU_VEC_PUSH(&st.dirs, &d);
+    assert(ignore_verdict(&st, "r/x.log", 0, &error) == 0 && error == NULL);
+    cu_arena_release(&a);
+}
+
 static void failures(void)
 {
     CuArena a;
@@ -296,6 +377,8 @@ int main(void)
     boundaries();
     double_star();
     trailing_space();
+    final_component();
+    empty_frames();
     failures();
     roots();
     ancestor_limit();
