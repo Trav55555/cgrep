@@ -56,8 +56,8 @@ make CUTILS=/path/to/c-utils
 ## Usage
 
 ```text
-cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]
-cgrep --version
+cgrep [-0cilnvw] [-j N] [--hidden] [--no-ignore] [--max-depth N] PATTERN [PATH...]
+cgrep --help | --version
 ```
 
 **No path means stdin.** Pass `.` to search the current directory. A path
@@ -87,13 +87,17 @@ Newline patterns are rejected.
 
 | Option | Behavior |
 | --- | --- |
+| `-h`, `--help` | Print usage and option summaries to stdout, exit 0. |
+| `-0`, `--null` | Follow printed paths with NUL, including the terminator in `-l` mode. Binary warnings retain their usual separator. |
+| `--hidden` | Search dot files and directories while applying ignore rules. |
+| `--max-depth N`, `--max-depth=N` | Root depth is 0; depth 1 searches immediate files. Explicit files are always searched. |
 | `-n` | Add line numbers. |
 | `-i` | Ignore ASCII letter case. Non-ASCII letters are not case-folded. |
 | `-w` | Require no word character immediately before or after the match. |
 | `-v` | Select lines that do not match. |
 | `-c` | Print each input's count of selected lines. Omit zero counts. |
 | `-l` | Print the name of each input with a selected line. |
-| `-j N`, `-jN` | Request 1 through 8 workers. The default is serial. |
+| `-j N`, `-jN` | Request 1 through 32 workers. The default is serial. |
 | `--no-ignore` | Disable ignore files. Discovered hidden names remain skipped. |
 | `--` | End option parsing. |
 | `--version` | Print the version and cgrep and c-utils source revisions. |
@@ -153,7 +157,7 @@ reported as `cgrep: PATH: ignore rules exceed the matching work limit`
 and skipped, and the search exits with status 2.
 
 `--no-ignore` disables these files, but does not enable hidden-name traversal.
-To search a hidden file directly, pass its filename explicitly.
+Combine it with `--hidden` to include hidden names, or pass a hidden file explicitly.
 
 The global file is `$XDG_CONFIG_HOME/git/ignore`, or
 `~/.config/git/ignore` when that environment variable is unset or empty.
@@ -185,6 +189,7 @@ files can be slower with workers. See the
 | Case and words | `-i` does not fold `é` to `É`. `-w` treats all non-ASCII characters as word characters, including punctuation. |
 | Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. A trailing space escaped by an odd run of backslashes is kept, as Git reads it; ripgrep 14 keeps it after any backslash. |
 | Ignore matching work | A verdict that exceeds the matching work limit (1,000,000 units plus 1,024 per rule tried, or `**` retries nested more than 256 deep) is an error for that entry: reported, skipped, status 2. |
+| Directory nesting | At most 256 levels below each root. Deeper directories report an error. An explicit maximum depth stops at min(N, 256) without error. |
 | Input size | Delivered-byte counters use `unsigned long`. Input beyond `ULONG_MAX` bytes reports an error instead of wrapping. |
 | Platforms | Native Windows and exotic integer-width ABIs remain unverified. |
 

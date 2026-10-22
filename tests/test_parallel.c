@@ -641,13 +641,13 @@ static void portable_options(void)
     args[1] = (char *)"-j";
     args[2] = NULL;
     assert(parallel_cli(2, args, in, out, err) == 2);
-    args[1] = (char *)"-j9";
+    args[1] = (char *)"-j33";
     assert(parallel_cli(2, args, in, out, err) == 2);
     args[1] = (char *)"-j";
     args[2] = (char *)"4";
     args[3] = NULL;
     assert(parallel_cli(3, args, in, out, err) == 2);
-    args[1] = (char *)"-j8";
+    args[1] = (char *)"-j32";
     args[2] = (char *)"alpha";
     assert(fputs("alpha\n", in) >= 0);
     rewind(in);
@@ -664,10 +664,11 @@ int main(int argc, char **argv)
     (void)argv;
     assert(worker_count("1") == 1);
     assert(worker_count("8") == 8);
+    assert(worker_count("33") == 0);
     assert(worker_count("0004") == 4);
     assert(worker_count("") == 0);
     assert(worker_count("0") == 0);
-    assert(worker_count("9") == 0);
+    assert(worker_count("32") == 32);
     assert(worker_count("99999999999999999999999") == 0);
     assert(worker_count("-1") == 0);
     assert(worker_count("1x") == 0);

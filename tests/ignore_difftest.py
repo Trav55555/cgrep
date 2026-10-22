@@ -68,7 +68,7 @@ def main() -> int:
     ap.add_argument("cgrep")
     ap.add_argument("--cases", type=int, default=300)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--jobs", type=int, choices=range(1, 9), default=1)
+    ap.add_argument("--jobs", type=int, choices=range(1, 33), default=1)
     ap.add_argument("--keep", type=Path, help="copy each failing case's tree here, for debugging")
     args = ap.parse_args()
     cgrep = str(Path(args.cgrep).resolve())
@@ -110,7 +110,12 @@ def main() -> int:
             else:
                 cwd, target = base, str(start)
             env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME="", RIPGREP_CONFIG_PATH="")
-            tail = ["-l", "--", "alpha", target]
+            flags = []
+            if rng.random() < 0.5:
+                flags += ["--hidden"]
+            if rng.random() < 0.5:
+                flags += ["--max-depth", str(rng.randrange(5))]
+            tail = flags + ["-l", "--", "alpha", target]
             want = subprocess.run(["rg", "--no-config", "--no-mmap", "-F", "-j1", "--sort", "path"] + tail,
                                   cwd=cwd, capture_output=True, timeout=30, env=env, stdin=subprocess.DEVNULL)
             got = subprocess.run([cgrep, f"-j{args.jobs}"] + tail, cwd=cwd, capture_output=True, timeout=30,
@@ -119,13 +124,12 @@ def main() -> int:
                     and bool(want.stderr) == bool(got.stderr))
             if not same:
                 failures += 1
-                if failures <= 3:
-                    print(f"case {case}: cwd={cwd.relative_to(base)} target={target}")
-                    for f in sorted(base.rglob("*")):
-                        if f.is_file() and (f.name in (".gitignore", ".ignore", ".rgignore", "exclude", "ignore")):
-                            print(f"  {f.relative_to(base)}: {f.read_text()!r}")
-                    print(f"  rg    exit {want.returncode}: {want.stdout.decode(errors='replace')!r}")
-                    print(f"  cgrep exit {got.returncode}: {got.stdout.decode(errors='replace')!r}")
+                print(f"case {case}: cwd={cwd.relative_to(base)} target={target} flags={flags}")
+                for f in sorted(base.rglob("*")):
+                    if f.is_file() and (f.name in (".gitignore", ".ignore", ".rgignore", "exclude", "ignore")):
+                        print(f"  {f.relative_to(base)}: {f.read_text()!r}")
+                print(f"  rg    exit {want.returncode}: {want.stdout.decode(errors='replace')!r}")
+                print(f"  cgrep exit {got.returncode}: {got.stdout.decode(errors='replace')!r}")
                 if args.keep is not None:
                     shutil.copytree(base, args.keep / f"case{case}", symlinks=True)
     print(f"ignore difftest: {args.cases - failures}/{args.cases} cases identical, cgrep -j{args.jobs}")

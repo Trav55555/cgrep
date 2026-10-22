@@ -55,8 +55,25 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]\n"
-                            "       cgrep --version\n";
+static const char usage[] = "usage: cgrep [-0cilnvw] [-j N] [--hidden] [--no-ignore] [--max-depth N] PATTERN [PATH...]\n"
+                            "       cgrep --help | --version\n";
+
+static const char help[] =
+    "  -h, --help     Print this help.\n"
+    "  -V, --version  Print version and source revisions.\n"
+    "  -0, --null     Follow printed paths with NUL.\n"
+    "  -n             Print line numbers.\n"
+    "  -i             Ignore ASCII case.\n"
+    "  -w             Match whole words.\n"
+    "  -v             Select non-matching lines.\n"
+    "  -c             Print selected-line counts.\n"
+    "  -l             Print matching file paths.\n"
+    "  -j N           Use 1 through 32 workers (default 1).\n";
+static const char help_walk[] =
+    "  --hidden       Search hidden names, respecting ignore rules.\n"
+    "  --no-ignore    Disable ignore files.\n"
+    "  --max-depth N  Limit traversal depth (root is depth 0).\n"
+    "  --             End option parsing.\n";
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
@@ -77,6 +94,7 @@ typedef struct {
 
 typedef struct {
     Literal literal;
+    int null;    /* -0: terminate printed paths with NUL */
     int numbers; /* -n: prefix each line with its number */
     int names;   /* prefix each line with its input's name */
     int invert;  /* -v: select lines without a match */
@@ -98,6 +116,7 @@ typedef struct {
 /* Options off, output to out; the caller sets the literal. */
 static void search_init(Search *s, FILE *out)
 {
+    s->null = 0;
     s->numbers = 0;
     s->names = 0;
     s->invert = 0;
@@ -751,7 +770,7 @@ static int print_line(const Search *s, CuStr text, size_t start, size_t stop, Pr
     part_count = 0;
     if (s->names) {
         parts[part_count++] = cu_str_n(name, name_len);
-        parts[part_count++] = cu_str_n(":", 1);
+        parts[part_count++] = cu_str_n(s->null ? "\0" : ":", 1);
     }
     if (s->numbers) {
         p->seen += count_lines(text, p->counted, start);
@@ -904,7 +923,7 @@ static int summary(const Search *s, const char *name, unsigned long selected)
     if (s->count) {
         if (s->names) {
             parts[k++] = cu_str_n(name, strlen(name));
-            parts[k++] = cu_str_n(":", 1);
+            parts[k++] = cu_str_n(s->null ? "\0" : ":", 1);
         }
         parts[k] = number_prefix(digits + sizeof digits, selected);
         parts[k].len--; /* number_prefix ends with ':' */
@@ -912,7 +931,7 @@ static int summary(const Search *s, const char *name, unsigned long selected)
     } else {
         parts[k++] = cu_str_n(name, strlen(name));
     }
-    parts[k++] = cu_str_n("\n", 1);
+    parts[k++] = cu_str_n(s->null && !s->count ? "\0" : "\n", 1);
     return emit(s, parts, k);
 }
 
@@ -1369,12 +1388,41 @@ static int worker_count(const char *text)
     if (*text == '\0')
         return 0;
     while (*text != '\0') {
-        if (*text < '0' || *text > '9' || n > 8)
+        if (*text < '0' || *text > '9' || n > 32)
             return 0;
         n = n * 10 + (*text++ - '0');
     }
-    return n >= 1 && n <= 8 ? n : 0;
+    return n >= 1 && n <= 32 ? n : 0;
 }
+
+/* Parse before clamping so overflowing values remain errors. */
+static int parse_depth(const char *text, unsigned long *depth)
+{
+    unsigned long n;
+    unsigned long digit;
+
+    n = 0;
+    if (*text == '+')
+        text++;
+    if (*text == '\0')
+        return 0;
+    while (*text != '\0') {
+        if (*text < '0' || *text > '9')
+            return 0;
+        digit = (unsigned long)(*text++ - '0');
+        if (n > (ULONG_MAX - digit) / 10)
+            return 0;
+        n = n * 10 + digit;
+    }
+    *depth = n;
+    return 1;
+}
+
+typedef struct {
+    int hidden;
+    int limited;
+    unsigned long max_depth;
+} WalkOptions;
 
 /* Inputs to search, in order: argument paths, and the files found under
  * directory arguments, which get the reference's handling of binary files
@@ -1439,7 +1487,8 @@ static char *join_path(CuArena *a, const char *dir, CuStr name)
  * NULL). Reports each failure, an entry whose ignore rules exceed the
  * matching work limit among them (it is skipped), and returns 0, after
  * adding whatever else it could. */
-static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st)
+static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st,
+                const WalkOptions *options, unsigned depth)
 {
     CuDir d;
     CuDirEntry e;
@@ -1454,6 +1503,12 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     int ok;
     int verdict;
 
+    if (options->limited && (depth >= options->max_depth || depth >= 256))
+        return 1;
+    if (depth > 256) {
+        fprintf(err, "cgrep: %s: directory nesting exceeds 256 levels\n", dir);
+        return 0;
+    }
     if (!cu_dir_open(&d, a, dir)) {
         fprintf(err, "cgrep: %s: %s\n", dir, cu_dir_errno(&d) == 0 ? "out of memory" : strerror(cu_dir_errno(&d)));
         return 0;
@@ -1465,7 +1520,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         listed |= ignore_listing_bit(e.name);
         if (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR)
             continue;
-        if (st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
+        if (!options->hidden && st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
             continue;
         CU_VEC_PUSH(&entries, &e);
     }
@@ -1497,7 +1552,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
                 ok = 0;
                 continue;
             }
-            if (list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
+            if (!options->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
                 continue;
         }
         if (list[i].kind == CU_DIR_FILE) {
@@ -1506,7 +1561,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
                 ok = 0;
                 break;
             }
-        } else if (!walk(a, path, inputs, err, st)) {
+        } else if (!walk(a, path, inputs, err, st, options, depth + 1)) {
             ok = 0;
         }
     }
@@ -1608,6 +1663,7 @@ static int directory_argument(const char *path)
 int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 {
     Search s;
+    WalkOptions options;
     Finder finder;
     CuArena pattern_arena;
     CuArena input_arena;
@@ -1637,6 +1693,9 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 
     search_init(&s, out);
     s.finder = &finder;
+    options.hidden = 0;
+    options.limited = 0;
+    options.max_depth = 0;
     ignoring = 1;
     jobs = 1;
     i = 1;
@@ -1644,6 +1703,37 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         if (strcmp(argv[i], "--") == 0) {
             i++;
             break;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            fputs(usage, out);
+            fputs(help, out);
+            fputs(help_walk, out);
+            return fflush(out) != 0 || ferror(out) ? 2 : 0;
+        }
+        if (strcmp(argv[i], "--hidden") == 0) {
+            options.hidden = 1;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--null") == 0) {
+            s.null = 1;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--max-depth") == 0 ||
+            strncmp(argv[i], "--max-depth=", 12) == 0) {
+            flag = argv[i];
+            if (argv[i][11] == '\0')
+                flag = i + 1 < argc ? argv[++i] : "";
+            else
+                flag += 12;
+            if (!parse_depth(flag, &options.max_depth)) {
+                fputs("cgrep: max depth must be a non-negative integer in range\n", err);
+                return 2;
+            }
+            options.limited = 1;
+            i++;
+            continue;
         }
         if (strcmp(argv[i], "--no-ignore") == 0) {
             ignoring = 0;
@@ -1657,7 +1747,14 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         /* Short flags cluster: -vn, -cj4. A value flag takes the rest of
          * its argument or, if that is empty, the next one. */
         for (flag = argv[i] + 1; *flag != '\0'; flag++) {
-            if (*flag == 'n') {
+            if (*flag == 'h') {
+                fputs(usage, out);
+                fputs(help, out);
+                fputs(help_walk, out);
+                return fflush(out) != 0 || ferror(out) ? 2 : 0;
+            } else if (*flag == '0') {
+                s.null = 1;
+            } else if (*flag == 'n') {
                 s.numbers = 1;
             } else if (*flag == 'c') {
                 s.count = 1;
@@ -1683,7 +1780,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
                 else
                     jobs = 0;
                 if (jobs == 0) {
-                    fputs("cgrep: worker count must be 1 through 8\n", err);
+                    fputs("cgrep: worker count must be 1 through 32\n", err);
                     return 2;
                 }
                 break;
@@ -1765,7 +1862,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
                 failed = 1;
                 break;
             }
-            if (!walk(&walk_arena, argv[k], &inputs, err, ignoring ? &ignores : NULL))
+            if (!walk(&walk_arena, argv[k], &inputs, err, ignoring ? &ignores : NULL, &options, 0))
                 failed = 1;
             /* The next root has its own parents. */
             while (CU_VEC_POP(&ignores.dirs, &unused_dir))
