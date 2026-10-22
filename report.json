@@ -1,0 +1,116 @@
+{
+  "status": "SUCCESS",
+  "requested": {
+    "repeats": 15
+  },
+  "tools": {
+    "cgrep": {
+      "version": "cgrep 0.1.0 (5cbc639, c-utils b74b8a9)"
+    },
+    "rg": {
+      "version": "ripgrep 15.2.0 (rev e89fff89ac)"
+    }
+  },
+  "cpu": "AMD EPYC 9V45 96-Core Processor",
+  "medians": {
+    "wide-files-cgrep-single": {
+      "elapsed_ns": 105232435
+    },
+    "wide-files-rg-single": {
+      "elapsed_ns": 126381834
+    },
+    "wide-files-cgrep-default": {
+      "elapsed_ns": 43891701
+    },
+    "wide-files-rg-default": {
+      "elapsed_ns": 51250915
+    },
+    "wide-lines-cgrep-single": {
+      "elapsed_ns": 102033861
+    },
+    "wide-lines-rg-single": {
+      "elapsed_ns": 126248206
+    },
+    "wide-lines-cgrep-default": {
+      "elapsed_ns": 41887033
+    },
+    "wide-lines-rg-default": {
+      "elapsed_ns": 51332118
+    },
+    "manydirs-files-cgrep-single": {
+      "elapsed_ns": 59453010
+    },
+    "manydirs-files-rg-single": {
+      "elapsed_ns": 80503716
+    },
+    "manydirs-files-cgrep-default": {
+      "elapsed_ns": 22148973
+    },
+    "manydirs-files-rg-default": {
+      "elapsed_ns": 27454302
+    },
+    "manydirs-lines-cgrep-single": {
+      "elapsed_ns": 58698534
+    },
+    "manydirs-lines-rg-single": {
+      "elapsed_ns": 82414105
+    },
+    "manydirs-lines-cgrep-default": {
+      "elapsed_ns": 21643767
+    },
+    "manydirs-lines-rg-default": {
+      "elapsed_ns": 28089397
+    },
+    "mixed-files-cgrep-single": {
+      "elapsed_ns": 107172227
+    },
+    "mixed-files-rg-single": {
+      "elapsed_ns": 47345506
+    },
+    "mixed-files-cgrep-default": {
+      "elapsed_ns": 48594395
+    },
+    "mixed-files-rg-default": {
+      "elapsed_ns": 19795183
+    },
+    "mixed-lines-cgrep-single": {
+      "elapsed_ns": 43681620
+    },
+    "mixed-lines-rg-single": {
+      "elapsed_ns": 49158300
+    },
+    "mixed-lines-cgrep-default": {
+      "elapsed_ns": 17077063
+    },
+    "mixed-lines-rg-default": {
+      "elapsed_ns": 20458973
+    }
+  },
+  "fixture": {
+    "shapes": {
+      "wide": {
+        "files": 20000,
+        "directories": 1,
+        "bytes": 1280000,
+        "planted_files": 1819
+      },
+      "manydirs": {
+        "files": 9330,
+        "directories": 1555,
+        "bytes": 597120,
+        "planted_files": 849
+      },
+      "mixed": {
+        "files": 5016,
+        "directories": 52,
+        "bytes": 293272338,
+        "planted_files": 380
+      }
+    },
+    "quick": false,
+    "word": "cgrepneedle",
+    "fanout": 6,
+    "levels": 4,
+    "files_per_directory": 6
+  }
+}
