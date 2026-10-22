@@ -222,13 +222,193 @@ static int inputs_cancelled(Inputs *inputs)
     return inputs->stop;
 }
 
+/* Prefetch threads list the directories the walk will enter, so its
+ * open/read/close calls overlap: the walker keeps every decision (order,
+ * ignore rules, reports) and only takes finished listings. The most
+ * recently queued directory is listed first, which in a depth-first walk
+ * is usually the next one entered. */
+#define PREFETCH_THREADS 4
+/* Threads wanted, at most PREFETCH_THREADS and the job count; 0 lists in
+ * the walker alone. */
+#ifndef CGREP_PREFETCH
+#define CGREP_PREFETCH PREFETCH_THREADS
+#endif
+/* Listings started or finished but not yet taken, at most. */
+#define PREFETCH_AHEAD 256
+#define PREFETCH_STACK ((size_t)262144)
+
+struct Prefetch {
+    CuMutex *mutex;
+    CuCond *work; /* queued, room freed, or stopping */
+    CuCond *done; /* a listing finished */
+    int stop;
+    int skip_hidden;
+    int ahead;
+    int waiting; /* the walker waits on done */
+    CuArena arena; /* stack and all; touched under mutex */
+    CuVec stack;   /* DirFetch *, the next to list on top */
+    CuVec all;     /* every queued DirFetch, to release unused listings */
+    CuArena thread_arena;
+    int want;    /* threads to start at the first queue */
+    int threads; /* started */
+    CuThread *thread[PREFETCH_THREADS];
+};
+
+static void prefetch_main(void *context)
+{
+    Prefetch *pf;
+    DirFetch *f;
+
+    pf = (Prefetch *)context;
+    cu_mutex_lock(pf->mutex);
+    for (;;) {
+        while (!pf->stop && (cu_vec_len(&pf->stack) == 0 || pf->ahead >= PREFETCH_AHEAD))
+            cu_cond_wait(pf->work, pf->mutex);
+        if (pf->stop)
+            break;
+        (void)CU_VEC_POP(&pf->stack, &f);
+        /* The walker claims a queued directory it reaches first. */
+        if (f->state != FETCH_QUEUED)
+            continue;
+        f->state = FETCH_RUNNING;
+        pf->ahead++;
+        cu_mutex_unlock(pf->mutex);
+        cu_arena_init(&f->arena);
+        f->arena.block_size = 4096;
+        read_dir(&f->arena, f->path, pf->skip_hidden, &f->list);
+        cu_mutex_lock(pf->mutex);
+        f->state = FETCH_DONE;
+        if (pf->waiting)
+            cu_cond_broadcast(pf->done);
+    }
+    cu_mutex_unlock(pf->mutex);
+}
+
+static void prefetch_queue(Prefetch *pf, DirFetch **fetches, size_t count)
+{
+    size_t i;
+
+    /* A walk that never enters a subdirectory starts no threads. Only the
+     * walker starts them, before any can touch pf. */
+    if (pf->want != 0) {
+        while (pf->threads < pf->want &&
+               cu_thread_start(&pf->thread[pf->threads], &pf->thread_arena, PREFETCH_STACK, prefetch_main, pf))
+            pf->threads++;
+        pf->want = 0;
+    }
+    if (pf->threads == 0)
+        return;
+    cu_mutex_lock(pf->mutex);
+    /* Pushed last-first, so the first to enter is on top. */
+    for (i = count; i-- > 0;) {
+        CU_VEC_PUSH(&pf->all, &fetches[i]);
+        if (cu_vec_failed(&pf->all))
+            break;
+        CU_VEC_PUSH(&pf->stack, &fetches[i]);
+        if (cu_vec_failed(&pf->stack))
+            break;
+        fetches[i]->state = FETCH_QUEUED;
+    }
+    cu_cond_broadcast(pf->work);
+    cu_mutex_unlock(pf->mutex);
+}
+
+static int prefetch_take(Prefetch *pf, DirFetch *f)
+{
+    int ready;
+
+    cu_mutex_lock(pf->mutex);
+    if (f->state == FETCH_QUEUED)
+        f->state = FETCH_TAKEN;
+    while (f->state == FETCH_RUNNING) {
+        pf->waiting = 1;
+        cu_cond_wait(pf->done, pf->mutex);
+    }
+    pf->waiting = 0;
+    ready = f->state == FETCH_DONE;
+    if (ready) {
+        f->state = FETCH_TAKEN;
+        if (pf->ahead-- == PREFETCH_AHEAD)
+            cu_cond_broadcast(pf->work);
+    }
+    cu_mutex_unlock(pf->mutex);
+    return ready;
+}
+
+/* Prepares up to want threads, started by the first prefetch_queue. Zero
+ * means nothing is held. */
+static int prefetch_start(Prefetch *pf, const Listing *l, int want)
+{
+    pf->stop = 0;
+    pf->skip_hidden = !l->options.hidden && !l->ignoring;
+    pf->ahead = 0;
+    pf->waiting = 0;
+    pf->threads = 0;
+    cu_arena_init(&pf->arena);
+    cu_arena_init(&pf->thread_arena);
+    CU_VEC_INIT(&pf->stack, &pf->arena, DirFetch *);
+    CU_VEC_INIT(&pf->all, &pf->arena, DirFetch *);
+    if (want > CGREP_PREFETCH)
+        want = CGREP_PREFETCH;
+    if (want < 1 || !cu_mutex_init(&pf->mutex, &pf->thread_arena)) {
+        cu_arena_release(&pf->thread_arena);
+        return 0;
+    }
+    if (!cu_cond_init(&pf->work, &pf->thread_arena)) {
+        cu_mutex_destroy(pf->mutex);
+        cu_arena_release(&pf->thread_arena);
+        return 0;
+    }
+    if (!cu_cond_init(&pf->done, &pf->thread_arena)) {
+        cu_cond_destroy(pf->work);
+        cu_mutex_destroy(pf->mutex);
+        cu_arena_release(&pf->thread_arena);
+        return 0;
+    }
+    pf->want = want;
+    return 1;
+}
+
+/* Joins the threads and releases listings the walk never took. */
+static void prefetch_stop(Prefetch *pf)
+{
+    DirFetch **all;
+    size_t i;
+    int t;
+
+    cu_mutex_lock(pf->mutex);
+    pf->stop = 1;
+    cu_cond_broadcast(pf->work);
+    cu_mutex_unlock(pf->mutex);
+    for (t = 0; t < pf->threads; t++)
+        cu_thread_join(pf->thread[t]);
+    all = CU_VEC_DATA(&pf->all, DirFetch *);
+    for (i = 0; i < cu_vec_len(&pf->all); i++)
+        if (all[i]->state == FETCH_DONE)
+            cu_arena_release(&all[i]->arena);
+    cu_cond_destroy(pf->done);
+    cu_cond_destroy(pf->work);
+    cu_mutex_destroy(pf->mutex);
+    cu_arena_release(&pf->thread_arena);
+    cu_arena_release(&pf->arena);
+}
+
 static void walker_main(void *context)
 {
     ParallelPool *pool;
+    Prefetch prefetch;
+    int prefetching;
     int ok;
 
     pool = (ParallelPool *)context;
+    prefetching = prefetch_start(&prefetch, pool->listing, pool->jobs);
+    if (prefetching)
+        pool->listing->inputs.prefetch = &prefetch;
     ok = list_inputs(pool->listing, pool->walker_err);
+    if (prefetching) {
+        pool->listing->inputs.prefetch = NULL;
+        prefetch_stop(&prefetch);
+    }
     pool_lock(pool);
     publish_diagnostics(pool);
     pool->listing_failed = !ok;
@@ -890,6 +1070,21 @@ static int inputs_publish(Inputs *inputs)
 {
     (void)inputs;
     return 1;
+}
+
+/* Without threads nothing is queued: the walk lists every directory. */
+static void prefetch_queue(Prefetch *pf, DirFetch **fetches, size_t count)
+{
+    (void)pf;
+    (void)fetches;
+    (void)count;
+}
+
+static int prefetch_take(Prefetch *pf, DirFetch *f)
+{
+    (void)pf;
+    (void)f;
+    return 0;
 }
 
 static int inputs_cancelled(Inputs *inputs)
