@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="944" height="420" viewBox="0 0 944 420" role="img" aria-labelledby="title desc">
 <title id="title">cgrep vs rg benchmark</title>
-<desc id="desc">Median wall time of 15 warm runs, process startup included. cgrep 0.1.0 (805650d, c-utils b74b8a9) at 805650d; ripgrep 15.2.0 (rev e89fff89ac). One thread: cgrep -j1, rg -j1 --sort path. Default threads: no thread option, so each tool uses its own default thread count. GitHub-hosted ubuntu-24.04 runner, 4 CPUs, INTEL(R) XEON(R) PLATINUM 8573C. Shared CI runners are noisy: compare ratios, not absolute times.</desc>
+<desc id="desc">Median wall time of 15 warm runs, process startup included. cgrep 0.1.0 (6976780, c-utils b74b8a9) at 6976780; ripgrep 15.2.0 (rev e89fff89ac). One thread: cgrep -j1, rg -j1 --sort path. Default threads: no thread option, so each tool uses its own default thread count. GitHub-hosted ubuntu-24.04 runner, 4 CPUs, AMD EPYC 7763 64-Core Processor. Shared CI runners are noisy: compare ratios, not absolute times.</desc>
 <style>
 .bg{fill:#fcfcfb}.rule{stroke:#e1e0d9}.ring{fill:none;stroke:rgba(11,11,11,0.10)}
 .t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.good{fill:#006300}.muted{fill:#52514e}
@@ -16,7 +16,7 @@ font-variant-numeric:tabular-nums}
 <rect class="bg" width="944" height="420" rx="8"/>
 <rect class="ring" x="0.5" y="0.5" width="943" height="419" rx="8"/>
 <text class="t1 title" x="24" y="36">cgrep vs rg, warm median wall time in ms</text>
-<text class="t2 sub" x="24" y="58">Lower is better. Commit 805650d; ripgrep 15.2.0 (rev e89fff89ac).</text>
+<text class="t2 sub" x="24" y="58">Lower is better. Commit 6976780; ripgrep 15.2.0 (rev e89fff89ac).</text>
 <text class="t3 head" x="24" y="104">Tree and query</text>
 <text class="t2 group" x="420" y="84">One thread</text>
 <line class="rule" x1="420" x2="660" y1="90" y2="90"/>
@@ -30,54 +30,54 @@ font-variant-numeric:tabular-nums}
 <text class="t3 head" x="920" y="104" text-anchor="end">cgrep vs rg</text>
 <line class="rule" x1="24" x2="920" y1="118" y2="118"/>
 <text class="cell" x="24" y="140"><tspan class="t1">wide: 20,000 files, 1 dir</tspan><tspan class="t2"> · -l WORD</tspan></text>
-<text class="t1 cell strong" x="465" y="140" text-anchor="end">76.66</text>
-<text class="t1 cell" x="535" y="140" text-anchor="end">107.72</text>
-<text class="good cell strong" x="660" y="140" text-anchor="end">1.41x faster</text>
-<text class="t1 cell strong" x="725" y="140" text-anchor="end">45.32</text>
-<text class="t1 cell" x="795" y="140" text-anchor="end">56.02</text>
-<text class="good cell strong" x="920" y="140" text-anchor="end">1.24x faster</text>
+<text class="t1 cell strong" x="465" y="140" text-anchor="end">123.84</text>
+<text class="t1 cell" x="535" y="140" text-anchor="end">154.30</text>
+<text class="good cell strong" x="660" y="140" text-anchor="end">1.25x faster</text>
+<text class="t1 cell strong" x="725" y="140" text-anchor="end">58.86</text>
+<text class="t1 cell" x="795" y="140" text-anchor="end">67.84</text>
+<text class="good cell strong" x="920" y="140" text-anchor="end">1.15x faster</text>
 <line class="rule" x1="24" x2="920" y1="152" y2="152"/>
 <text class="cell" x="24" y="174"><tspan class="t1">wide: 20,000 files, 1 dir</tspan><tspan class="t2"> · WORD (lines)</tspan></text>
-<text class="t1 cell strong" x="465" y="174" text-anchor="end">76.41</text>
-<text class="t1 cell" x="535" y="174" text-anchor="end">108.60</text>
-<text class="good cell strong" x="660" y="174" text-anchor="end">1.42x faster</text>
-<text class="t1 cell strong" x="725" y="174" text-anchor="end">45.37</text>
-<text class="t1 cell" x="795" y="174" text-anchor="end">56.17</text>
-<text class="good cell strong" x="920" y="174" text-anchor="end">1.24x faster</text>
+<text class="t1 cell strong" x="465" y="174" text-anchor="end">123.36</text>
+<text class="t1 cell" x="535" y="174" text-anchor="end">156.59</text>
+<text class="good cell strong" x="660" y="174" text-anchor="end">1.27x faster</text>
+<text class="t1 cell strong" x="725" y="174" text-anchor="end">58.45</text>
+<text class="t1 cell" x="795" y="174" text-anchor="end">67.66</text>
+<text class="good cell strong" x="920" y="174" text-anchor="end">1.16x faster</text>
 <line class="rule" x1="24" x2="920" y1="186" y2="186"/>
 <text class="cell" x="24" y="208"><tspan class="t1">manydirs: 9,330 files, 1,555 dirs</tspan><tspan class="t2"> · -l WORD</tspan></text>
-<text class="t1 cell strong" x="465" y="208" text-anchor="end">43.61</text>
-<text class="t1 cell" x="535" y="208" text-anchor="end">65.53</text>
-<text class="good cell strong" x="660" y="208" text-anchor="end">1.50x faster</text>
-<text class="t1 cell strong" x="725" y="208" text-anchor="end">31.20</text>
-<text class="t1 cell" x="795" y="208" text-anchor="end">32.82</text>
-<text class="good cell strong" x="920" y="208" text-anchor="end">1.05x faster</text>
+<text class="t1 cell strong" x="465" y="208" text-anchor="end">69.09</text>
+<text class="t1 cell" x="535" y="208" text-anchor="end">95.50</text>
+<text class="good cell strong" x="660" y="208" text-anchor="end">1.38x faster</text>
+<text class="t1 cell strong" x="725" y="208" text-anchor="end">29.98</text>
+<text class="t1 cell" x="795" y="208" text-anchor="end">41.43</text>
+<text class="good cell strong" x="920" y="208" text-anchor="end">1.38x faster</text>
 <line class="rule" x1="24" x2="920" y1="220" y2="220"/>
 <text class="cell" x="24" y="242"><tspan class="t1">manydirs: 9,330 files, 1,555 dirs</tspan><tspan class="t2"> · WORD (lines)</tspan></text>
-<text class="t1 cell strong" x="465" y="242" text-anchor="end">43.72</text>
-<text class="t1 cell" x="535" y="242" text-anchor="end">66.23</text>
-<text class="good cell strong" x="660" y="242" text-anchor="end">1.51x faster</text>
-<text class="t1 cell strong" x="725" y="242" text-anchor="end">31.11</text>
-<text class="t1 cell" x="795" y="242" text-anchor="end">32.82</text>
-<text class="good cell strong" x="920" y="242" text-anchor="end">1.05x faster</text>
+<text class="t1 cell strong" x="465" y="242" text-anchor="end">69.09</text>
+<text class="t1 cell" x="535" y="242" text-anchor="end">96.43</text>
+<text class="good cell strong" x="660" y="242" text-anchor="end">1.40x faster</text>
+<text class="t1 cell strong" x="725" y="242" text-anchor="end">30.18</text>
+<text class="t1 cell" x="795" y="242" text-anchor="end">41.41</text>
+<text class="good cell strong" x="920" y="242" text-anchor="end">1.37x faster</text>
 <line class="rule" x1="24" x2="920" y1="254" y2="254"/>
 <text class="cell" x="24" y="276"><tspan class="t1">mixed: 5,016 files, 52 dirs</tspan><tspan class="t2"> · -l WORD</tspan></text>
-<text class="t1 cell strong" x="465" y="276" text-anchor="end">57.85</text>
-<text class="t1 cell" x="535" y="276" text-anchor="end">71.21</text>
-<text class="good cell strong" x="660" y="276" text-anchor="end">1.23x faster</text>
-<text class="t1 cell strong" x="725" y="276" text-anchor="end">27.05</text>
-<text class="t1 cell" x="795" y="276" text-anchor="end">31.89</text>
-<text class="good cell strong" x="920" y="276" text-anchor="end">1.18x faster</text>
+<text class="t1 cell strong" x="465" y="276" text-anchor="end">58.66</text>
+<text class="t1 cell" x="535" y="276" text-anchor="end">66.86</text>
+<text class="good cell strong" x="660" y="276" text-anchor="end">1.14x faster</text>
+<text class="t1 cell strong" x="725" y="276" text-anchor="end">25.92</text>
+<text class="t1 cell" x="795" y="276" text-anchor="end">27.08</text>
+<text class="good cell strong" x="920" y="276" text-anchor="end">1.04x faster</text>
 <line class="rule" x1="24" x2="920" y1="288" y2="288"/>
 <text class="cell" x="24" y="310"><tspan class="t1">mixed: 5,016 files, 52 dirs</tspan><tspan class="t2"> · WORD (lines)</tspan></text>
-<text class="t1 cell strong" x="465" y="310" text-anchor="end">60.23</text>
-<text class="t1 cell" x="535" y="310" text-anchor="end">74.46</text>
-<text class="good cell strong" x="660" y="310" text-anchor="end">1.24x faster</text>
-<text class="t1 cell strong" x="725" y="310" text-anchor="end">28.36</text>
-<text class="t1 cell" x="795" y="310" text-anchor="end">32.92</text>
-<text class="good cell strong" x="920" y="310" text-anchor="end">1.16x faster</text>
+<text class="t1 cell strong" x="465" y="310" text-anchor="end">59.97</text>
+<text class="t1 cell" x="535" y="310" text-anchor="end">68.69</text>
+<text class="good cell strong" x="660" y="310" text-anchor="end">1.15x faster</text>
+<text class="t1 cell strong" x="725" y="310" text-anchor="end">26.80</text>
+<text class="t1 cell" x="795" y="310" text-anchor="end">27.58</text>
+<text class="good cell strong" x="920" y="310" text-anchor="end">1.03x faster</text>
 <line class="rule" x1="24" x2="920" y1="322" y2="322"/>
 <text class="t3 note" x="24" y="346">15 warm runs per cell, process startup included. One thread: cgrep -j1, rg -j1 --sort path. Default: no thread option for either tool.</text>
-<text class="t3 note" x="24" y="363">cgrep 0.1.0 (805650d, c-utils b74b8a9); ripgrep 15.2.0 (rev e89fff89ac).</text>
-<text class="t3 note" x="24" y="380">GitHub-hosted ubuntu-24.04 runner, 4 CPUs, INTEL(R) XEON(R) PLATINUM 8573C. Shared runners are noisy: compare ratios.</text>
+<text class="t3 note" x="24" y="363">cgrep 0.1.0 (6976780, c-utils b74b8a9); ripgrep 15.2.0 (rev e89fff89ac).</text>
+<text class="t3 note" x="24" y="380">GitHub-hosted ubuntu-24.04 runner, 4 CPUs, AMD EPYC 7763 64-Core Processor. Shared runners are noisy: compare ratios.</text>
 </svg>
