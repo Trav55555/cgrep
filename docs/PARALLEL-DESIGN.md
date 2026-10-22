@@ -183,6 +183,45 @@ ordered acknowledgment, output flushing, cancellation, joins, and capacity
 remain unchanged. Boundary/failure fixtures and compiled mutants exercise the
 new paths; [verification](../verification.md) records the full acceptance.
 
+## Listing ahead
+
+On trees of many small directories the walker thread became the limit:
+on 9,331 directories of four tiny files each, `-j3` was as fast as
+anything and more workers only waited on it (63 ms at `-j3`, 71 ms at the
+default 12, against 48 ms for ripgrep). Each directory costs the walker an
+open, an fstat, two getdents and a close before it can decide anything.
+
+Prefetch threads (at most four and at most `-j`, started when the walk
+first queues a subdirectory) now make those calls ahead of it:
+
+- `walk` first decides every entry of a directory (path, ignore verdict,
+  hidden rule; verdicts only read the ignore stack) and queues the
+  subdirectories it will enter, then reports, adds and recurses in the same
+  order as before. Reports are unchanged at every `-j`.
+- The queue is a stack pushed last-first, so the next directory the
+  depth-first walk enters is usually listed first. At most 256 listings may
+  be in flight or waiting; the walker claims a queued directory it reaches
+  before any thread did and lists it itself.
+- `read_dir` is the only listing code; the walker and the prefetch threads
+  share it, each listing into the directory's own small arena, which the
+  walker releases once the names are copied into paths. Listings the walk
+  never took (cancellation) are released after the threads are joined.
+- `-j1`, and any setup failure, list in the walker alone.
+
+Median of 41 interleaved runs, `-l` with no match, default threads, ms:
+
+| Tree | before | after | ripgrep 15.2.0 |
+| --- | ---: | ---: | ---: |
+| 9,331 dirs, 37,324 files | 68.8 | 54.6 | 46.2 |
+| CI manydirs (1,555 dirs) | 14.1 | 12.8 | 14.5 |
+| CI mixed | 14.5 | 14.9 | 16.0 |
+| `/usr/include` | 5.4 | 5.5 | 7.8 |
+| `src/` (no subdirectories) | 0.70 | 0.69 | 3.15 |
+
+The remaining gap is in the pool rather than the walk: with listing ahead
+the large tree is fastest at `-j6` (50 ms) and slows again with more
+workers, as it did before (63 ms at `-j3`, 79 ms at `-j24`).
+
 ## Verification gates
 
 - Exact serial/parallel output order and diagnostics; fixed literal parity.
@@ -193,6 +232,11 @@ new paths; [verification](../verification.md) records the full acceptance.
   continues after its first inputs are consumed, walk diagnostics through
   the coordinator, listing without a memory stream, a cancelled walk that
   stops listing, and no task surviving return.
+- Listing ahead (`tests/test_prefetch.c`): `-j2/-j4/-j8` against `-j1`
+  byte for byte, with ignore files, hidden names, `--max-depth`, an
+  unopenable directory, a slow prefetch listing and more siblings than may
+  be listed ahead; every prefetch thread, lock and condition start failure;
+  and cancellation with listings in flight.
 - Native sanitizer/analyzer/release/Valgrind profiles and a live race detector
   where supported; portable argument parsing and serial behavior under wasm.
 - Paired strongest-competitor benchmarks, including heavy output and small

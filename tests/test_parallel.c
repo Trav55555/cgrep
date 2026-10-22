@@ -232,6 +232,9 @@ static int test_close(FILE *file)
 /* Every unclaimed input starts a worker, so small fixtures use workers. */
 #define CGREP_START_BACKLOG 1
 #define CGREP_BATCH_START test_batch_start
+/* The walker lists alone: thread and lock counts below are the pool's.
+ * tests/test_prefetch.c covers listing ahead. */
+#define CGREP_PREFETCH 0
 #define CGREP_POOL_ALLOC test_alloc
 #define CGREP_POOL_FREE test_free
 #define cu_thread_start test_create

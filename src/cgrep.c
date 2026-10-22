@@ -1462,10 +1462,12 @@ typedef struct {
  * the lister adds to them in runs of INPUT_PENDING. */
 #define INPUT_PENDING 64
 typedef struct ParallelPool ParallelPool;
+typedef struct Prefetch Prefetch;
 typedef struct {
     CuVec paths;  /* char *, borrowed from argv or in the walk arena */
     CuVec walked; /* unsigned char, 1 for a path found by walking */
     ParallelPool *pool; /* NULL: the caller searches after listing */
+    Prefetch *prefetch; /* NULL: the walk lists each directory itself */
     int stop;           /* the pool was cancelled: list no more */
     int pending;
     char *pending_paths[INPUT_PENDING];
@@ -1532,28 +1534,99 @@ static char *join_path(CuArena *a, const char *dir, CuStr name)
 
 #include "ignore.inc"
 
+/* One directory's listing: its regular files and directories, without
+ * names that start with '.' when skip_hidden, and the ignore-file bits of
+ * every name. Names live in the arena it was listed into. */
+typedef struct {
+    CuVec entries; /* CuDirEntry */
+    unsigned listed;
+    int opened; /* 0: could not open; error says why */
+    int failed; /* opened, but listing or storing stopped early */
+    int error;  /* the failure's errno; 0 means out of memory */
+} DirList;
+
+static void read_dir(CuArena *a, const char *dir, int skip_hidden, DirList *out)
+{
+    CuDir d;
+    CuDirEntry e;
+    int r;
+
+    out->listed = 0;
+    out->failed = 0;
+    out->error = 0;
+    CU_VEC_INIT(&out->entries, a, CuDirEntry);
+    out->opened = cu_dir_open(&d, a, dir);
+    if (!out->opened) {
+        out->error = cu_dir_errno(&d);
+        return;
+    }
+    while ((r = cu_dir_next(&d, &e)) == 1) {
+        out->listed |= ignore_listing_bit(e.name);
+        if (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR)
+            continue;
+        if (skip_hidden && e.name.len != 0 && e.name.ptr[0] == '.')
+            continue;
+        CU_VEC_PUSH(&out->entries, &e);
+    }
+    if (r < 0 || cu_vec_failed(&out->entries)) {
+        out->failed = 1;
+        out->error = r < 0 ? cu_dir_errno(&d) : 0;
+    }
+    cu_dir_close(&d);
+}
+
+/* A directory the walk will enter, listed ahead of it by a prefetch
+ * thread when one is free (see parallel.inc). The walker allocates it and
+ * takes the listing from it; arena is initialized by whoever lists. */
+typedef enum { FETCH_QUEUED, FETCH_RUNNING, FETCH_DONE, FETCH_TAKEN } FetchState;
+typedef struct {
+    const char *path;
+    FetchState state;
+    CuArena arena;
+    DirList list;
+} DirFetch;
+
+/* Queues fetches[0 .. count - 1], to be entered in that order. One the
+ * prefetcher could not queue is left TAKEN for the walker to list. */
+static void prefetch_queue(Prefetch *pf, DirFetch **fetches, size_t count);
+/* Waits for f's listing, or claims f for the walker to list itself if no
+ * prefetch thread has started it. Returns 1 when f->list is ready. */
+static int prefetch_take(Prefetch *pf, DirFetch *f);
+
+/* An entry of the directory being walked, decided before any is used. */
+typedef struct {
+    char *path;
+    const char *error; /* its ignore rules could not be matched */
+    DirFetch *fetch;   /* a directory queued for listing, or NULL */
+    unsigned char is_dir;
+    unsigned char skip;
+} WalkEntry;
+
 /* Adds the regular files under dir, depth first with each directory's
  * names in byte order, skipping symbolic links (never followed), other
  * non-regular entries, names that start with '.' unless an ignore file
  * un-ignores them, and anything an ignore file ignores (st, or none when
  * NULL). Reports each failure, an entry whose ignore rules exceed the
  * matching work limit among them (it is skipped), and returns 0, after
- * adding whatever else it could. */
+ * adding whatever else it could. fetch, when not NULL, holds or will hold
+ * dir's listing. */
 static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st,
-                const WalkOptions *options, unsigned depth)
+                const WalkOptions *options, unsigned depth, DirFetch *fetch)
 {
-    CuDir d;
-    CuDirEntry e;
+    DirList own;
+    DirList *dl;
+    DirFetch **queue;
     CuDirEntry *list;
-    CuVec entries;
-    char *path;
+    WalkEntry *items;
     const char *error;
     size_t count;
+    size_t done;
+    size_t queued;
     size_t i;
-    unsigned listed;
-    int r;
     int ok;
     int verdict;
+    int out_of_memory;
+    int skip_hidden;
 
     if (options->limited && (depth >= options->max_depth || depth >= 256))
         return 1;
@@ -1563,61 +1636,108 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         fprintf(err, "cgrep: %s: directory nesting exceeds 256 levels\n", dir);
         return 0;
     }
-    if (!cu_dir_open(&d, a, dir)) {
-        fprintf(err, "cgrep: %s: %s\n", dir, cu_dir_errno(&d) == 0 ? "out of memory" : strerror(cu_dir_errno(&d)));
+    skip_hidden = !options->hidden && st == NULL;
+    if (fetch != NULL && prefetch_take(inputs->prefetch, fetch)) {
+        dl = &fetch->list;
+    } else {
+        if (fetch != NULL) {
+            /* Listed here, but released with the fetch like any other. */
+            cu_arena_init(&fetch->arena);
+            fetch->arena.block_size = 4096;
+            dl = &fetch->list;
+            read_dir(&fetch->arena, dir, skip_hidden, dl);
+        } else {
+            dl = &own;
+            read_dir(a, dir, skip_hidden, dl);
+        }
+    }
+    if (!dl->opened) {
+        fprintf(err, "cgrep: %s: %s\n", dir, dl->error == 0 ? "out of memory" : strerror(dl->error));
+        if (fetch != NULL)
+            cu_arena_release(&fetch->arena);
         return 0;
     }
     ok = 1;
-    listed = 0;
-    CU_VEC_INIT(&entries, a, CuDirEntry);
-    while ((r = cu_dir_next(&d, &e)) == 1) {
-        listed |= ignore_listing_bit(e.name);
-        if (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR)
-            continue;
-        if (!options->hidden && st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
-            continue;
-        CU_VEC_PUSH(&entries, &e);
-    }
-    if (r < 0 || cu_vec_failed(&entries)) {
-        fprintf(err, "cgrep: %s: %s\n", dir,
-                r < 0 && cu_dir_errno(&d) != 0 ? strerror(cu_dir_errno(&d)) : "out of memory");
+    if (dl->failed) {
+        fprintf(err, "cgrep: %s: %s\n", dir, dl->error != 0 ? strerror(dl->error) : "out of memory");
         ok = 0;
     }
-    cu_dir_close(&d);
-    if (st != NULL && !push_ignore_dir(st, dir, listed, 0, NULL)) {
+    if (st != NULL && !push_ignore_dir(st, dir, dl->listed, 0, NULL)) {
         fprintf(err, "cgrep: %s: out of memory\n", dir);
+        if (fetch != NULL)
+            cu_arena_release(&fetch->arena);
         return 0;
     }
-    count = cu_vec_len(&entries);
-    list = CU_VEC_DATA(&entries, CuDirEntry);
+    count = cu_vec_len(&dl->entries);
+    list = CU_VEC_DATA(&dl->entries, CuDirEntry);
     if (count > 1)
         qsort(list, count, sizeof *list, entry_order);
-    for (i = 0; i < count; i++) {
-        path = join_path(a, dir, list[i].name);
-        if (path == NULL) {
-            fprintf(err, "cgrep: %s: out of memory\n", dir);
-            ok = 0;
+    /* Decide every entry first, so the directories to enter can be listed
+     * ahead; ignore verdicts read st only. Nothing is reported or added
+     * until the loop below, which keeps the serial order. */
+    items = count == 0 ? NULL : CU_PUSH(a, WalkEntry, count);
+    queue = inputs->prefetch == NULL || count == 0 ? NULL : CU_PUSH(a, DirFetch *, count);
+    out_of_memory = count != 0 && items == NULL;
+    done = out_of_memory ? 0 : count;
+    queued = 0;
+    for (i = 0; i < done; i++) {
+        items[i].path = join_path(a, dir, list[i].name);
+        if (items[i].path == NULL) {
+            out_of_memory = 1;
+            done = i;
             break;
         }
+        items[i].error = NULL;
+        items[i].fetch = NULL;
+        items[i].is_dir = list[i].kind == CU_DIR_DIR;
+        items[i].skip = 0;
         if (st != NULL) {
-            verdict = ignore_verdict(st, path, list[i].kind == CU_DIR_DIR, &error);
+            verdict = ignore_verdict(st, items[i].path, items[i].is_dir, &error);
             if (error != NULL) {
-                fprintf(err, "cgrep: %s: %s\n", path, error);
-                ok = 0;
+                items[i].error = error;
                 continue;
             }
             if (!options->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
-                continue;
+                items[i].skip = 1;
         }
-        if (list[i].kind == CU_DIR_FILE) {
-            if (!add_input(inputs, path, 1)) {
-                fprintf(err, "cgrep: %s: out of memory\n", dir);
-                ok = 0;
+        /* Directories the walk below would return from at once are not
+         * listed ahead. */
+        if (queue != NULL && items[i].is_dir && !items[i].skip &&
+            !(options->limited && (depth + 1 >= options->max_depth || depth + 1 >= 256)) &&
+            depth + 1 <= 256) {
+            items[i].fetch = CU_PUSH(a, DirFetch, 1);
+            if (items[i].fetch != NULL) {
+                items[i].fetch->path = items[i].path;
+                items[i].fetch->state = FETCH_TAKEN;
+                queue[queued++] = items[i].fetch;
+            }
+        }
+    }
+    /* The names are copied into the paths. */
+    if (fetch != NULL)
+        cu_arena_release(&fetch->arena);
+    if (queued != 0)
+        prefetch_queue(inputs->prefetch, queue, queued);
+    for (i = 0; i < done; i++) {
+        if (items[i].error != NULL) {
+            fprintf(err, "cgrep: %s: %s\n", items[i].path, items[i].error);
+            ok = 0;
+            continue;
+        }
+        if (items[i].skip)
+            continue;
+        if (!items[i].is_dir) {
+            if (!add_input(inputs, items[i].path, 1)) {
+                out_of_memory = 1;
                 break;
             }
-        } else if (!walk(a, path, inputs, err, st, options, depth + 1)) {
+        } else if (!walk(a, items[i].path, inputs, err, st, options, depth + 1, items[i].fetch)) {
             ok = 0;
         }
+    }
+    if (out_of_memory) {
+        fprintf(err, "cgrep: %s: out of memory\n", dir);
+        ok = 0;
     }
     if (st != NULL)
         pop_ignore_dir(st);
@@ -1775,7 +1895,7 @@ static int list_inputs(Listing *l, FILE *err)
             failed = 1;
             break;
         }
-        if (!walk(l->arena, l->args[k], &l->inputs, err, l->ignoring ? &l->ignores : NULL, &l->options, 0))
+        if (!walk(l->arena, l->args[k], &l->inputs, err, l->ignoring ? &l->ignores : NULL, &l->options, 0, NULL))
             failed = 1;
         /* The next root has its own parents. */
         while (CU_VEC_POP(&l->ignores.dirs, &unused_dir))
@@ -1847,13 +1967,12 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
             i++;
             continue;
         }
-        if (strcmp(argv[i], "--max-depth") == 0 ||
-            strncmp(argv[i], "--max-depth=", 12) == 0) {
-            flag = argv[i];
-            if (argv[i][11] == '\0')
-                flag = i + 1 < argc ? argv[++i] : "";
-            else
-                flag += 12;
+        flag = NULL;
+        if (strcmp(argv[i], "--max-depth") == 0)
+            flag = i + 1 < argc ? argv[++i] : "";
+        else if (strncmp(argv[i], "--max-depth=", 12) == 0)
+            flag = argv[i] + 12;
+        if (flag != NULL) {
             if (!parse_depth(flag, &listing.options.max_depth)) {
                 fputs("cgrep: max depth must be a non-negative integer in range\n", err);
                 return 2;
@@ -1964,6 +2083,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     CU_VEC_INIT(&listing.inputs.paths, &walk_arena, char *);
     CU_VEC_INIT(&listing.inputs.walked, &walk_arena, unsigned char);
     listing.inputs.pool = NULL;
+    listing.inputs.prefetch = NULL;
     listing.inputs.stop = 0;
     listing.inputs.pending = 0;
     listing.ignores.arena = &walk_arena;
