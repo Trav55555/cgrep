@@ -599,6 +599,27 @@ static void batch_cases(char **paths)
     same_file(out, expected);
     same_file(err, expected_err);
     assert(fclose(out) == 0 && fclose(err) == 0);
+    /* A non-regular input without a match is searched serially and is
+     * neither a match nor a failure. */
+    out = fopen(paths[5], "wb");
+    assert(out != NULL && fputs("beta only\n", out) >= 0 && fclose(out) == 0);
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 6, "-j1", out, err) == 0);
+    assert(fclose(expected) == 0 && fclose(expected_err) == 0);
+    expected = out;
+    expected_err = err;
+    fault = F_SERIAL;
+    fault_path = paths[5];
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 6, "-j2", out, err) == 0);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    write_fixture(paths[5], 0);
     /* An unreadable input in a batch is reported at its position. */
     fault = F_OPEN;
     fault_path = paths[2];
