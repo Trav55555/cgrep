@@ -60,3 +60,11 @@ mutate:
 
 $(BUILD):
 	mkdir -p $@
+
+.PHONY: bench-test bench-tree
+bench-test:
+	python3 -m unittest discover -s tests -p test_benchmark_tree.py
+	python3 -m unittest discover -s tests -p test_render_bench.py
+
+bench-tree: $(BUILD)/cgrep
+	python3 -I tests/benchmark_tree.py $(BUILD)/cgrep --rg rg --output $(BUILD)/bench-tree
