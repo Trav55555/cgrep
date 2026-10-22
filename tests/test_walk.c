@@ -215,6 +215,35 @@ static void ignore_files(void)
     assert(run(3, workers) == 0);
     assert(strcmp(out_text, expected) == 0 && err_text[0] == '\0');
 #ifndef __wasi__
+    /* An unreadable .gitignore, exclude or global file is skipped without a
+     * diagnostic, as the reference does (ripgrep 14.1.1 drops the error). */
+    {
+        static const char *const locked[] = {"g/.gitignore", "g/.git/info/exclude", "xdg/git/ignore"};
+        char p[600];
+        FILE *f;
+
+        sprintf(p, "%s/%s", root, locked[0]);
+        assert(chmod(p, 0) == 0);
+        f = fopen(p, "rb");
+        if (f != NULL) {
+            assert(fclose(f) == 0);
+        } else {
+            assert(errno == EACCES);
+            for (i = 1; i < sizeof locked / sizeof locked[0]; i++) {
+                sprintf(p, "%s/%s", root, locked[i]);
+                assert(chmod(p, 0) == 0);
+            }
+            assert(run(2, whole) == 0 && err_text[0] == '\0');
+            assert(strcmp(out_text, "g/a.log:alpha\ng/b.txt:alpha\ng/c.tmp:alpha\ng/keep.log:alpha\n"
+                                    "g/lib/keep.txt:alpha\ng/lib/other.txt:alpha\ng/out/o.txt:alpha\n"
+                                    "g/sub/c.log:alpha\ng/sub/y.txt:alpha\ng/sub/z.txt:alpha\ng/x.ex:alpha\n") == 0);
+        }
+        for (i = 0; i < sizeof locked / sizeof locked[0]; i++) {
+            sprintf(p, "%s/%s", root, locked[i]);
+            assert(chmod(p, 0600) == 0);
+        }
+        assert(run(2, whole) == 0 && strcmp(out_text, expected) == 0 && err_text[0] == '\0');
+    }
     assert(getcwd(cwd, sizeof cwd) != NULL && chdir(root) == 0);
     assert(run(2, relative) == 0 && strcmp(out_text, expected) == 0 && err_text[0] == '\0');
     assert(chdir(cwd) == 0);
