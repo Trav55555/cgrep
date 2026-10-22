@@ -288,6 +288,7 @@ static int parse_ignore(CuArena *a, CuStr text, IgnoreFile *f)
     const char *nl;
     size_t len;
     size_t at;
+    size_t run;
 
     CU_VEC_INIT(&rules, a, IgnoreRule);
     for (at = 0; at < text.len; at += len + 1) {
@@ -298,9 +299,16 @@ static int parse_ignore(CuArena *a, CuStr text, IgnoreFile *f)
         r.len = len;
         if (r.len != 0 && r.glob[r.len - 1] == '\r')
             r.len--;
-        /* Trailing spaces go unless escaped. */
-        while (r.len != 0 && r.glob[r.len - 1] == ' ' && !(r.len >= 2 && r.glob[r.len - 2] == '\\'))
+        /* Trailing spaces go unless escaped, which an odd run of
+         * backslashes does (as git reads it: "\\ " ends in an escaped
+         * backslash and a space that goes). */
+        while (r.len != 0 && r.glob[r.len - 1] == ' ') {
+            for (run = 0; run + 1 < r.len && r.glob[r.len - 2 - run] == '\\'; run++)
+                ;
+            if (run % 2 != 0)
+                break;
             r.len--;
+        }
         if (r.len == 0 || r.glob[0] == '#')
             continue;
         r.negate = r.glob[0] == '!';

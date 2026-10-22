@@ -185,6 +185,26 @@ static void double_star(void)
     cu_arena_release(&a);
 }
 
+/* A trailing space is escaped only by an odd run of backslashes, as git
+ * reads it: "a\\ " (two backslashes) is the glob "a\\", not "a\\ ". */
+static void trailing_space(void)
+{
+    CuArena a;
+    IgnoreFile f;
+
+    cu_arena_init(&a);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\ \n"), &f) && f.count == 1 && f.rules[0].len == 3);
+    assert(verdict(&f, "a\\", 0) == 1);
+    assert(verdict(&f, "a\\ ", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\  \n"), &f) && f.count == 1 && f.rules[0].len == 3);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\\\ \n"), &f) && f.count == 1 && f.rules[0].len == 5);
+    assert(verdict(&f, "a\\ ", 0) == 1);
+    assert(verdict(&f, "a\\", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("\\\\\n"), &f) && f.count == 1 && f.rules[0].len == 2);
+    assert(verdict(&f, "\\", 0) == 1);
+    cu_arena_release(&a);
+}
+
 static void failures(void)
 {
     CuArena a;
@@ -275,6 +295,7 @@ int main(void)
 {
     boundaries();
     double_star();
+    trailing_space();
     failures();
     roots();
     ancestor_limit();
