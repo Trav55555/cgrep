@@ -29,6 +29,7 @@ static int mutexes;
 static int conditions;
 static const char *denied; /* opening this path fails with EACCES */
 static const char *slow;   /* a prefetch thread lists this path slowly */
+static const char *slow_skipped; /* and this ignored one, listed ahead */
 
 static void prefetch_main(void *context);
 
@@ -139,7 +140,8 @@ static int test_dir_open(CuDir *d, CuArena *a, const char *path)
         helper_lists += helper;
         assert(pthread_mutex_unlock(&counts) == 0);
     }
-    if (helper && slow != NULL && strcmp(path, slow) == 0)
+    if (helper && ((slow != NULL && strcmp(path, slow) == 0) ||
+                   (slow_skipped != NULL && strcmp(path, slow_skipped) == 0)))
         usleep(50000);
     if (denied != NULL && strcmp(path, denied) == 0) {
         d->handle = NULL;
@@ -228,6 +230,16 @@ static void build(void)
             dir(rel);
             assert(sprintf(rel, "n%d/m%d/.dotdir/f", i, j) > 0);
             put(rel, "alpha dotdir\n");
+            /* Ignored below the root: listed ahead before the walker's
+             * verdict, then discarded with what was queued below it. */
+            assert(sprintf(rel, "n%d/m%d/skipped", i, j) > 0);
+            dir(rel);
+            assert(sprintf(rel, "n%d/m%d/skipped/s", i, j) > 0);
+            dir(rel);
+            assert(sprintf(rel, "n%d/m%d/skipped/s/t", i, j) > 0);
+            dir(rel);
+            assert(sprintf(rel, "n%d/m%d/skipped/s/t/f", i, j) > 0);
+            put(rel, "alpha skipped deep\n");
         }
     }
     dir("wide");
@@ -318,6 +330,7 @@ static void cases(void)
     static const char *const jobs[] = {"-j2", "-j4", "-j8"};
     char locked[96];
     char slowed[96];
+    char slowed_skipped[96];
     CuArena a;
     Run serial;
     Run threaded;
@@ -328,8 +341,10 @@ static void cases(void)
     cu_arena_init(&a);
     assert(sprintf(locked, "%s/locked", root) > 0);
     assert(sprintf(slowed, "%s/slow", root) > 0);
+    assert(sprintf(slowed_skipped, "%s/n0/m1/skipped", root) > 0);
     denied = locked;
     slow = slowed;
+    slow_skipped = slowed_skipped;
     for (f = 0; f < sizeof flags / sizeof flags[0]; f++) {
         run(&a, "-j1", flags[f], NULL, &serial);
         assert(prefetch_starts == 0);
