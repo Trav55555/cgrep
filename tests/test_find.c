@@ -7,6 +7,9 @@
 #include "cu.h"
 #include "cgrep.h"
 
+/* Wrap the C function, not libc's optional type-generic macro. */
+#undef memchr
+
 static size_t confirmations;
 static size_t confirmation_bytes;
 static size_t newline_scans;
