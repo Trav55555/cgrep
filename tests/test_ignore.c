@@ -246,8 +246,13 @@ static void final_component(void)
 static void rule_allowance(void)
 {
     CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
     IgnoreFile f;
+    const char *error;
     char *text;
+    char *path;
+    char *rel;
     size_t used;
     int i;
 
@@ -261,6 +266,85 @@ static void rule_allowance(void)
     assert(verdict(&f, "sub/file.ext0", 0) == 1 && !work.failed);
     assert(verdict(&f, "sub/file.c", 0) == 0 && !work.failed);
     free(text);
+    /* The rules add a bounded amount: 2000 cheap ones (tried first, as
+     * later lines) do not let the hostile first line finish. */
+    text = (char *)malloc(2000 * 16 + 64);
+    assert(text != NULL);
+    used = (size_t)sprintf(text, "**/d/**/d/**/d/**/d/**/d/**/d/**/d/**/zzz\n");
+    for (i = 0; i < 2000; i++)
+        used += (size_t)sprintf(text + used, "*.ext%d\n", i);
+    assert(parse_ignore(&a, cu_str_n(text, used), &f) && f.count == 2001);
+    path = repeated("d/", 40, "f");
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    /* The global file is budgeted the same way: no verdict, an error. */
+    init_stack(&st, &a, "r");
+    init_dir(&d, "r", 1);
+    CU_VEC_PUSH(&st.dirs, &d);
+    st.global = f;
+    rel = (char *)malloc(strlen(path) + 3);
+    assert(rel != NULL);
+    sprintf(rel, "r/%s", path);
+    error = NULL;
+    assert(ignore_verdict(&st, rel, 0, &error) == 0 && error != NULL);
+    assert(strcmp(error, "ignore rules exceed the matching work limit") == 0);
+    free(rel);
+    free(path);
+    free(text);
+    cu_arena_release(&a);
+}
+
+/* The exact work of simple verdicts, from the cost model: one unit per
+ * rule, per matcher step and per retry, a component's length plus one to
+ * scan it. "**" then "/" then "b" against "a/b" tries zero components
+ * first (6), then retries after the '/' (6), with the glob and path scans
+ * around them; a repeated "**" costs one more to collapse. */
+static void costs(void)
+{
+    static const struct {
+        const char *rules;
+        const char *rel;
+        int expected;
+        unsigned long spent;
+    } cases[] = {{"b\n", "a/b", 1, 9}, {"a/b\n", "a/b", 1, 13}, {"**/b\n", "a/b", 1, 19},
+        {"**/**/b\n", "a/b", 1, 20}, {"**/**\n", "a/b", 1, 6}};
+    CuArena a;
+    IgnoreFile f;
+    size_t i;
+
+    cu_arena_init(&a);
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        assert(parse_ignore(&a, cu_str_cstr(cases[i].rules), &f));
+        assert(verdict(&f, cases[i].rel, 0) == cases[i].expected);
+        assert(work.left == IGNORE_WORK_LIMIT + IGNORE_RULE_WORK - cases[i].spent);
+    }
+    cu_arena_release(&a);
+}
+
+/* The matcher reads no byte past a glob or a path: a trailing "**" of
+ * exactly five bytes, and a path whose every '/' is retried, in buffers
+ * of their exact size. */
+static void exact_buffers(void)
+{
+    CuArena a;
+    IgnoreFile f;
+    char *text;
+    char *path;
+
+    cu_arena_init(&a);
+    text = (char *)malloc(5);
+    path = (char *)malloc(3);
+    assert(text != NULL && path != NULL);
+    memcpy(text, "**/**", 5);
+    memcpy(path, "a/b", 3);
+    assert(parse_ignore(&a, cu_str_n(text, 5), &f) && f.count == 1 && f.rules[0].len == 5);
+    fresh_work();
+    assert(file_verdict(&f, path, 3, 0, &work) == 1 && !work.failed);
+    memcpy(text, "**/zz", 5);
+    assert(parse_ignore(&a, cu_str_n(text, 5), &f) && f.count == 1);
+    fresh_work();
+    assert(file_verdict(&f, path, 3, 0, &work) == 0 && !work.failed);
+    free(text);
+    free(path);
     cu_arena_release(&a);
 }
 
@@ -433,6 +517,8 @@ int main(void)
     final_component();
     empty_frames();
     rule_allowance();
+    costs();
+    exact_buffers();
     failures();
     roots();
     long_paths();
