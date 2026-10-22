@@ -1578,20 +1578,30 @@ static void read_dir(CuArena *a, const char *dir, int skip_hidden, DirList *out)
 /* A directory the walk will enter, listed ahead of it by a prefetch
  * thread when one is free (see parallel.inc). The walker allocates it and
  * takes the listing from it; arena is initialized by whoever lists. */
-typedef enum { FETCH_QUEUED, FETCH_RUNNING, FETCH_DONE, FETCH_TAKEN } FetchState;
-typedef struct {
+typedef enum { FETCH_QUEUED, FETCH_RUNNING, FETCH_DONE, FETCH_TAKEN, FETCH_DISCARDED } FetchState;
+typedef struct DirFetch DirFetch;
+struct DirFetch {
     const char *path;
     FetchState state;
+    unsigned depth; /* walk's depth for path */
+    int discarded;  /* dropped while RUNNING: freed when it finishes */
+    int sorted;     /* list.entries are in entry_order */
+    /* Per entry of a listing a prefetch thread made: that subdirectory,
+     * queued ahead of the walk, or NULL. */
+    DirFetch **children;
     CuArena arena;
     DirList list;
-} DirFetch;
+};
 
-/* Queues fetches[0 .. count - 1], to be entered in that order. One the
- * prefetcher could not queue is left TAKEN for the walker to list. */
+/* Queues fetches[0 .. count - 1]. One the prefetcher could not queue is
+ * left TAKEN for the walker to list. */
 static void prefetch_queue(Prefetch *pf, DirFetch **fetches, size_t count);
 /* Waits for f's listing, or claims f for the walker to list itself if no
  * prefetch thread has started it. Returns 1 when f->list is ready. */
 static int prefetch_take(Prefetch *pf, DirFetch *f);
+/* Drops a queued subdirectory the walk will not enter, with everything
+ * listed ahead below it. */
+static void prefetch_discard(Prefetch *pf, DirFetch *f);
 
 /* An entry of the directory being walked, decided before any is used. */
 typedef struct {
@@ -1616,6 +1626,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     DirList own;
     DirList *dl;
     DirFetch **queue;
+    DirFetch **children;
     CuDirEntry *list;
     WalkEntry *items;
     const char *error;
@@ -1627,6 +1638,8 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     int verdict;
     int out_of_memory;
     int skip_hidden;
+    int sorted;
+    int enter;
 
     if (options->limited && (depth >= options->max_depth || depth >= 256))
         return 1;
@@ -1637,8 +1650,12 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         return 0;
     }
     skip_hidden = !options->hidden && st == NULL;
+    children = NULL;
+    sorted = 0;
     if (fetch != NULL && prefetch_take(inputs->prefetch, fetch)) {
         dl = &fetch->list;
+        children = fetch->children;
+        sorted = fetch->sorted;
     } else {
         if (fetch != NULL) {
             /* Listed here, but released with the fetch like any other. */
@@ -1657,6 +1674,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
             cu_arena_release(&fetch->arena);
         return 0;
     }
+    count = cu_vec_len(&dl->entries);
     ok = 1;
     if (dl->failed) {
         fprintf(err, "cgrep: %s: %s\n", dir, dl->error != 0 ? strerror(dl->error) : "out of memory");
@@ -1664,13 +1682,15 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     }
     if (st != NULL && !push_ignore_dir(st, dir, dl->listed, 0, NULL)) {
         fprintf(err, "cgrep: %s: out of memory\n", dir);
+        for (i = 0; children != NULL && i < count; i++)
+            if (children[i] != NULL)
+                prefetch_discard(inputs->prefetch, children[i]);
         if (fetch != NULL)
             cu_arena_release(&fetch->arena);
         return 0;
     }
-    count = cu_vec_len(&dl->entries);
     list = CU_VEC_DATA(&dl->entries, CuDirEntry);
-    if (count > 1)
+    if (count > 1 && !sorted)
         qsort(list, count, sizeof *list, entry_order);
     /* Decide every entry first, so the directories to enter can be listed
      * ahead; ignore verdicts read st only. Nothing is reported or added
@@ -1693,26 +1713,38 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         items[i].skip = 0;
         if (st != NULL) {
             verdict = ignore_verdict(st, items[i].path, items[i].is_dir, &error);
-            if (error != NULL) {
+            if (error != NULL)
                 items[i].error = error;
-                continue;
-            }
-            if (!options->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
+            else if (!options->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
                 items[i].skip = 1;
         }
         /* Directories the walk below would return from at once are not
          * listed ahead. */
-        if (queue != NULL && items[i].is_dir && !items[i].skip &&
-            !(options->limited && (depth + 1 >= options->max_depth || depth + 1 >= 256)) &&
-            depth + 1 <= 256) {
+        enter = items[i].is_dir && items[i].error == NULL && !items[i].skip &&
+                !(options->limited && (depth + 1 >= options->max_depth || depth + 1 >= 256)) &&
+                depth + 1 <= 256;
+        if (children != NULL && children[i] != NULL) {
+            /* Listed ahead by a prefetch thread, before any verdict. */
+            if (enter)
+                items[i].fetch = children[i];
+            else
+                prefetch_discard(inputs->prefetch, children[i]);
+        } else if (enter && queue != NULL) {
             items[i].fetch = CU_PUSH(a, DirFetch, 1);
             if (items[i].fetch != NULL) {
                 items[i].fetch->path = items[i].path;
                 items[i].fetch->state = FETCH_TAKEN;
+                items[i].fetch->depth = depth + 1;
+                items[i].fetch->discarded = 0;
+                items[i].fetch->sorted = 0;
+                items[i].fetch->children = NULL;
                 queue[queued++] = items[i].fetch;
             }
         }
     }
+    for (i = done; children != NULL && i < count; i++)
+        if (children[i] != NULL)
+            prefetch_discard(inputs->prefetch, children[i]);
     /* The names are copied into the paths. */
     if (fetch != NULL)
         cu_arena_release(&fetch->arena);
@@ -1734,7 +1766,12 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         } else if (!walk(a, items[i].path, inputs, err, st, options, depth + 1, items[i].fetch)) {
             ok = 0;
         }
+        items[i].fetch = NULL;
     }
+    /* Left by a failure: nothing below them will be entered. */
+    for (; i < done; i++)
+        if (items[i].fetch != NULL)
+            prefetch_discard(inputs->prefetch, items[i].fetch);
     if (out_of_memory) {
         fprintf(err, "cgrep: %s: out of memory\n", dir);
         ok = 0;

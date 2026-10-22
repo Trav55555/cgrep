@@ -247,16 +247,22 @@ static int inputs_cancelled(Inputs *inputs)
 
 /* Prefetch threads list the directories the walk will enter, so its
  * open/read/close calls overlap: the walker keeps every decision (order,
- * ignore rules, reports) and only takes finished listings. The most
- * recently queued directory is listed first, which in a depth-first walk
- * is usually the next one entered. */
+ * ignore rules, reports) and only takes finished listings.
+ *
+ * A thread that lists a directory also sorts it and queues its
+ * subdirectories, before the walker has decided whether to enter them, so
+ * listing runs ahead by more than one level. Hidden names are not queued
+ * that way unless --hidden, nor anything the depth limits would skip. The
+ * walker discards a queued subdirectory it skips, with everything queued
+ * below it. Threads take the queued directory the walk reaches first: a
+ * depth-first walk wants them in walk_order. */
 #define PREFETCH_THREADS 4
 /* Threads wanted, at most PREFETCH_THREADS and the job count; 0 lists in
  * the walker alone. */
 #ifndef CGREP_PREFETCH
 #define CGREP_PREFETCH PREFETCH_THREADS
 #endif
-/* Listings started or finished but not yet taken, at most. */
+/* Listings started or finished but not yet taken or discarded, at most. */
 #define PREFETCH_AHEAD 256
 #define PREFETCH_STACK ((size_t)262144)
 
@@ -265,32 +271,163 @@ struct Prefetch {
     CuCond *work; /* queued, room freed, or stopping */
     CuCond *done; /* a listing finished */
     int stop;
-    int skip_hidden;
+    int skip_hidden;   /* read_dir drops hidden names */
+    int hidden;        /* --hidden: hidden subdirectories may be queued */
+    int limited;       /* --max-depth */
+    unsigned long max_depth;
     int ahead;
     int waiting; /* the walker waits on done */
-    CuArena arena; /* stack and all; touched under mutex */
-    CuVec stack;   /* DirFetch *, the next to list on top */
-    CuVec all;     /* every queued DirFetch, to release unused listings */
+    /* Everything below is touched under mutex, including the arena that
+     * holds queued subdirectories, their paths and children arrays. */
+    CuArena arena;
+    CuVec heap;  /* DirFetch *, by walk_order; stale entries are skipped */
+    CuVec all;   /* every queued DirFetch, to release unused listings */
     CuArena thread_arena;
     int want;    /* threads to start at the first queue */
     int threads; /* started */
     CuThread *thread[PREFETCH_THREADS];
 };
 
+/* Depth-first walk order of two paths under one root, each directory's
+ * names in entry_order: a path's end, then '/', then any other byte. */
+static int walk_order(const char *a, const char *b)
+{
+    unsigned char x;
+    unsigned char y;
+
+    for (;; a++, b++) {
+        x = (unsigned char)*a;
+        y = (unsigned char)*b;
+        if (x != y)
+            break;
+        if (x == '\0')
+            return 0;
+    }
+    if (x == '\0' || y == '\0')
+        return x == '\0' ? -1 : 1;
+    if (x == '/' || y == '/')
+        return x == '/' ? -1 : 1;
+    return x < y ? -1 : 1;
+}
+
+/* Adds f to the heap. Zero means out of memory. Holds the mutex. */
+static int heap_push(Prefetch *pf, DirFetch *f)
+{
+    DirFetch **h;
+    DirFetch *t;
+    size_t i;
+    size_t up;
+
+    CU_VEC_PUSH(&pf->heap, &f);
+    if (cu_vec_failed(&pf->heap))
+        return 0;
+    h = CU_VEC_DATA(&pf->heap, DirFetch *);
+    for (i = cu_vec_len(&pf->heap) - 1; i > 0; i = up) {
+        up = (i - 1) / 2;
+        if (walk_order(h[up]->path, h[i]->path) <= 0)
+            break;
+        t = h[up];
+        h[up] = h[i];
+        h[i] = t;
+    }
+    return 1;
+}
+
+/* Removes and returns the first fetch in walk order. Holds the mutex. */
+static DirFetch *heap_pop(Prefetch *pf)
+{
+    DirFetch **h;
+    DirFetch *first;
+    DirFetch *t;
+    size_t n;
+    size_t i;
+    size_t c;
+
+    h = CU_VEC_DATA(&pf->heap, DirFetch *);
+    first = h[0];
+    (void)CU_VEC_POP(&pf->heap, &t);
+    n = cu_vec_len(&pf->heap);
+    if (n == 0)
+        return first;
+    h[0] = t;
+    for (i = 0; (c = 2 * i + 1) < n; i = c) {
+        if (c + 1 < n && walk_order(h[c + 1]->path, h[c]->path) < 0)
+            c++;
+        if (walk_order(h[i]->path, h[c]->path) <= 0)
+            break;
+        t = h[i];
+        h[i] = h[c];
+        h[c] = t;
+    }
+    return first;
+}
+
+/* Queues f's subdirectories after its listing, aligned with its sorted
+ * entries. What cannot be queued is left to the walker. Holds the mutex. */
+static void queue_children(Prefetch *pf, DirFetch *f)
+{
+    CuDirEntry *list;
+    DirFetch *child;
+    size_t count;
+    size_t i;
+    unsigned depth;
+
+    f->children = NULL;
+    depth = f->depth + 1;
+    count = cu_vec_len(&f->list.entries);
+    if (count == 0 || !f->list.opened || depth > 256 ||
+        (pf->limited && (depth >= pf->max_depth || depth >= 256)))
+        return;
+    list = CU_VEC_DATA(&f->list.entries, CuDirEntry);
+    f->children = CU_PUSH(&pf->arena, DirFetch *, count);
+    if (f->children == NULL)
+        return;
+    for (i = 0; i < count; i++) {
+        f->children[i] = NULL;
+        if (list[i].kind != CU_DIR_DIR ||
+            (!pf->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.'))
+            continue;
+        child = CU_PUSH(&pf->arena, DirFetch, 1);
+        if (child == NULL)
+            continue;
+        child->path = join_path(&pf->arena, f->path, list[i].name);
+        if (child->path == NULL)
+            continue;
+        child->state = FETCH_QUEUED;
+        child->depth = depth;
+        child->discarded = 0;
+        child->sorted = 0;
+        child->children = NULL;
+        CU_VEC_PUSH(&pf->all, &child);
+        if (cu_vec_failed(&pf->all) || !heap_push(pf, child))
+            continue;
+        f->children[i] = child;
+    }
+}
+
+/* A taken or discarded listing no longer counts against PREFETCH_AHEAD.
+ * Holds the mutex. */
+static void prefetch_settled(Prefetch *pf)
+{
+    if (pf->ahead-- == PREFETCH_AHEAD)
+        cu_cond_broadcast(pf->work);
+}
+
 static void prefetch_main(void *context)
 {
     Prefetch *pf;
     DirFetch *f;
+    size_t count;
 
     pf = (Prefetch *)context;
     cu_mutex_lock(pf->mutex);
     for (;;) {
-        while (!pf->stop && (cu_vec_len(&pf->stack) == 0 || pf->ahead >= PREFETCH_AHEAD))
+        while (!pf->stop && (cu_vec_len(&pf->heap) == 0 || pf->ahead >= PREFETCH_AHEAD))
             cu_cond_wait(pf->work, pf->mutex);
         if (pf->stop)
             break;
-        (void)CU_VEC_POP(&pf->stack, &f);
-        /* The walker claims a queued directory it reaches first. */
+        f = heap_pop(pf);
+        /* Taken by the walker, or discarded, while it waited. */
         if (f->state != FETCH_QUEUED)
             continue;
         f->state = FETCH_RUNNING;
@@ -299,10 +436,23 @@ static void prefetch_main(void *context)
         cu_arena_init(&f->arena);
         f->arena.block_size = 4096;
         read_dir(&f->arena, f->path, pf->skip_hidden, &f->list);
+        count = cu_vec_len(&f->list.entries);
+        if (count > 1)
+            qsort(CU_VEC_DATA(&f->list.entries, CuDirEntry), count, sizeof(CuDirEntry), entry_order);
         cu_mutex_lock(pf->mutex);
+        if (f->discarded) {
+            cu_arena_release(&f->arena);
+            f->state = FETCH_DISCARDED;
+            prefetch_settled(pf);
+            continue;
+        }
+        f->sorted = 1;
+        queue_children(pf, f);
         f->state = FETCH_DONE;
         if (pf->waiting)
             cu_cond_broadcast(pf->done);
+        if (f->children != NULL)
+            cu_cond_broadcast(pf->work);
     }
     cu_mutex_unlock(pf->mutex);
 }
@@ -322,13 +472,9 @@ static void prefetch_queue(Prefetch *pf, DirFetch **fetches, size_t count)
     if (pf->threads == 0)
         return;
     cu_mutex_lock(pf->mutex);
-    /* Pushed last-first, so the first to enter is on top. */
-    for (i = count; i-- > 0;) {
+    for (i = 0; i < count; i++) {
         CU_VEC_PUSH(&pf->all, &fetches[i]);
-        if (cu_vec_failed(&pf->all))
-            break;
-        CU_VEC_PUSH(&pf->stack, &fetches[i]);
-        if (cu_vec_failed(&pf->stack))
+        if (cu_vec_failed(&pf->all) || !heap_push(pf, fetches[i]))
             break;
         fetches[i]->state = FETCH_QUEUED;
     }
@@ -351,11 +497,45 @@ static int prefetch_take(Prefetch *pf, DirFetch *f)
     ready = f->state == FETCH_DONE;
     if (ready) {
         f->state = FETCH_TAKEN;
-        if (pf->ahead-- == PREFETCH_AHEAD)
-            cu_cond_broadcast(pf->work);
+        prefetch_settled(pf);
     }
     cu_mutex_unlock(pf->mutex);
     return ready;
+}
+
+/* Holds the mutex. Recursion follows directories queued below f, at most
+ * 256 levels. */
+static void discard_locked(Prefetch *pf, DirFetch *f)
+{
+    size_t count;
+    size_t i;
+
+    switch (f->state) {
+    case FETCH_QUEUED:
+        f->state = FETCH_DISCARDED;
+        break;
+    case FETCH_RUNNING:
+        f->discarded = 1;
+        break;
+    case FETCH_DONE:
+        count = cu_vec_len(&f->list.entries);
+        for (i = 0; f->children != NULL && i < count; i++)
+            if (f->children[i] != NULL)
+                discard_locked(pf, f->children[i]);
+        cu_arena_release(&f->arena);
+        f->state = FETCH_DISCARDED;
+        prefetch_settled(pf);
+        break;
+    default:
+        break;
+    }
+}
+
+static void prefetch_discard(Prefetch *pf, DirFetch *f)
+{
+    cu_mutex_lock(pf->mutex);
+    discard_locked(pf, f);
+    cu_mutex_unlock(pf->mutex);
 }
 
 /* Prepares up to want threads, started by the first prefetch_queue. Zero
@@ -364,12 +544,15 @@ static int prefetch_start(Prefetch *pf, const Listing *l, int want)
 {
     pf->stop = 0;
     pf->skip_hidden = !l->options.hidden && !l->ignoring;
+    pf->hidden = l->options.hidden;
+    pf->limited = l->options.limited;
+    pf->max_depth = l->options.max_depth;
     pf->ahead = 0;
     pf->waiting = 0;
     pf->threads = 0;
     cu_arena_init(&pf->arena);
     cu_arena_init(&pf->thread_arena);
-    CU_VEC_INIT(&pf->stack, &pf->arena, DirFetch *);
+    CU_VEC_INIT(&pf->heap, &pf->arena, DirFetch *);
     CU_VEC_INIT(&pf->all, &pf->arena, DirFetch *);
     if (want > CGREP_PREFETCH)
         want = CGREP_PREFETCH;
@@ -1115,6 +1298,12 @@ static int prefetch_take(Prefetch *pf, DirFetch *f)
     (void)pf;
     (void)f;
     return 0;
+}
+
+static void prefetch_discard(Prefetch *pf, DirFetch *f)
+{
+    (void)pf;
+    (void)f;
 }
 
 static int inputs_cancelled(Inputs *inputs)

@@ -198,10 +198,10 @@ first queues a subdirectory) now make those calls ahead of it:
   hidden rule; verdicts only read the ignore stack) and queues the
   subdirectories it will enter, then reports, adds and recurses in the same
   order as before. Reports are unchanged at every `-j`.
-- The queue is a stack pushed last-first, so the next directory the
-  depth-first walk enters is usually listed first. At most 256 listings may
-  be in flight or waiting; the walker claims a queued directory it reaches
-  before any thread did and lists it itself.
+- At most 256 listings may be in flight or waiting; the walker claims a
+  queued directory it reaches before any thread did and lists it itself.
+  (The queue order and how far ahead it reaches are in "Listing further
+  ahead" below.)
 - `read_dir` is the only listing code; the walker and the prefetch threads
   share it, each listing into the directory's own small arena, which the
   walker releases once the names are copied into paths. Listings the walk
@@ -251,6 +251,48 @@ walker thread, listing takes about 45 ms of a 50 ms run, of which about
 prefetch thread had reached, because the depth-first walk usually wants
 the directory it queued last.
 
+## Listing further ahead
+
+Listing ahead one level at a time left the walker waiting: timed inside
+the walker thread, ~21 ms of a ~46 ms walk went to listings still in
+flight (about 2,300 directories) or not yet started (about 1,400), since
+a depth-first walk wants the directory it queued last.
+
+Now:
+
+- A prefetch thread that lists a directory also sorts it and queues its
+  subdirectories itself, before the walker has decided on them, aligned
+  with the sorted entries (`DirFetch.children`). The walker takes those
+  instead of queuing its own and skips sorting that listing.
+- Hidden subdirectories are not queued this way unless `--hidden` (so
+  `.git` is never listed ahead), nor anything the depth limits would skip.
+- When the walker skips a subdirectory that was queued ahead (ignored,
+  hidden, a verdict error, or left by an allocation failure), it discards
+  it with everything queued below it: queued ones are dropped, one being
+  listed is freed when its thread finishes, finished ones are freed at
+  once. Work spent on an ignored subtree is bounded by the 256 listings that
+  may be ahead.
+- Threads take the queued directory the walk reaches first: a heap ordered
+  by `walk_order`, which compares paths component by component in
+  `entry_order` (a path's end, then `/`, then any other byte), so the
+  listings ahead are the next ones the walk needs.
+
+Median of 21 interleaved runs, `-l` with no match, wall ms:
+
+| Tree | before | after | ripgrep 15.2.0 |
+| --- | ---: | ---: | ---: |
+| 9,331 dirs, default `-j` (12) | 46.0 | 36.0 | 44.1 |
+| 9,331 dirs, `-j6` | 41.7 | 38.2 | |
+| 9,331 dirs, `-j32` | 44.7 | 38.4 | |
+| CI manydirs | 11.0 | 9.1 | 13.4 |
+| CI mixed | 13.7 | 13.4 | 14.8 |
+| CI wide (20,000 files, one directory) | 20.7 | 20.3 | 26.2 |
+| `/usr/include` | 4.9 | 4.8 | 7.4 |
+| `src/` | 0.8 | 0.7 | 3.4 |
+
+On a repository whose 20,000-directory `node_modules` is ignored one
+level below the root, both builds make the same six directory reads.
+
 ## Verification gates
 
 - Exact serial/parallel output order and diagnostics; fixed literal parity.
@@ -265,7 +307,9 @@ the directory it queued last.
   byte for byte, with ignore files, hidden names, `--max-depth`, an
   unopenable directory, a slow prefetch listing and more siblings than may
   be listed ahead; every prefetch thread, lock and condition start failure;
-  and cancellation with listings in flight.
+  and cancellation with listings in flight; ignored subtrees below the
+  root listed ahead and discarded while queued, while being listed and
+  after (each state reached in every run).
 - Native sanitizer/analyzer/release/Valgrind profiles and a live race detector
   where supported; portable argument parsing and serial behavior under wasm.
 - Paired strongest-competitor benchmarks, including heavy output and small
