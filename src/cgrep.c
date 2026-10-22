@@ -55,8 +55,26 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]\n"
-                            "       cgrep --version\n";
+static const char usage[] = "usage: cgrep [-0cilnvw] [-j N] [--hidden] [--no-ignore] [--max-depth N] PATTERN [PATH...]\n"
+                            "       cgrep --help | --version\n";
+
+static const char help[] =
+    "  -h, --help     Print this help.\n"
+    "  -V, --version  Print version and source revisions.\n"
+    "  -0, --null     Follow printed paths with NUL.\n"
+    "  -n             Print line numbers.\n"
+    "  -i             Ignore ASCII case.\n"
+    "  -w             Match whole words.\n"
+    "  -v             Select non-matching lines.\n"
+    "  -c             Print selected-line counts.\n"
+    "  -l             Print matching file paths.\n"
+    "  -j N           Use 1 through 32 workers (default: online CPUs, at most 32;\n"
+    "                 1 where no worker backend exists).\n";
+static const char help_walk[] =
+    "  --hidden       Search hidden names, respecting ignore rules.\n"
+    "  --no-ignore    Disable ignore files.\n"
+    "  --max-depth N  Limit traversal depth (root is depth 0).\n"
+    "  --             End option parsing.\n";
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
@@ -77,6 +95,7 @@ typedef struct {
 
 typedef struct {
     Literal literal;
+    int null;    /* -0: terminate printed paths with NUL */
     int numbers; /* -n: prefix each line with its number */
     int names;   /* prefix each line with its input's name */
     int invert;  /* -v: select lines without a match */
@@ -98,6 +117,7 @@ typedef struct {
 /* Options off, output to out; the caller sets the literal. */
 static void search_init(Search *s, FILE *out)
 {
+    s->null = 0;
     s->numbers = 0;
     s->names = 0;
     s->invert = 0;
@@ -751,7 +771,7 @@ static int print_line(const Search *s, CuStr text, size_t start, size_t stop, Pr
     part_count = 0;
     if (s->names) {
         parts[part_count++] = cu_str_n(name, name_len);
-        parts[part_count++] = cu_str_n(":", 1);
+        parts[part_count++] = cu_str_n(s->null ? "\0" : ":", 1);
     }
     if (s->numbers) {
         p->seen += count_lines(text, p->counted, start);
@@ -857,6 +877,7 @@ typedef struct {
     int matched;
     ScanError error;
     int system_error;
+    unsigned long bytes; /* delivered input bytes, for worker batch sizing */
 } ScanResult;
 
 static int add_bytes(unsigned long *total, size_t n)
@@ -904,7 +925,7 @@ static int summary(const Search *s, const char *name, unsigned long selected)
     if (s->count) {
         if (s->names) {
             parts[k++] = cu_str_n(name, strlen(name));
-            parts[k++] = cu_str_n(":", 1);
+            parts[k++] = cu_str_n(s->null ? "\0" : ":", 1);
         }
         parts[k] = number_prefix(digits + sizeof digits, selected);
         parts[k].len--; /* number_prefix ends with ':' */
@@ -912,7 +933,7 @@ static int summary(const Search *s, const char *name, unsigned long selected)
     } else {
         parts[k++] = cu_str_n(name, strlen(name));
     }
-    parts[k++] = cu_str_n("\n", 1);
+    parts[k++] = cu_str_n(s->null && !s->count ? "\0" : "\n", 1);
     return emit(s, parts, k);
 }
 
@@ -1157,6 +1178,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     result.matched = 0;
     result.error = SCAN_OK;
     result.system_error = 0;
+    result.bytes = 0;
     total = 0;
     lines = 0;
     selected = 0;
@@ -1184,6 +1206,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         scan_stream(s, in, buffer, 0, s->count ? SELECT_COUNT : SELECT_FIRST, &total, &selected, &result);
         if (result.error == SCAN_OK && result.matched && !summary(s, name, selected))
             result.error = SCAN_OUTPUT;
+        result.bytes = total;
         return result;
     }
     for (;;) {
@@ -1295,6 +1318,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         if (buffer->len != 0)
             memmove(buffer->data, buffer->data + end, buffer->len);
     }
+    result.bytes = total;
     return result;
 }
 
@@ -1340,6 +1364,7 @@ static int search_input(const Search *search, const char *path, int walked, FILE
             result.matched = 0;
             result.error = SCAN_IO;
             result.system_error = cu_input_errno(&input);
+            result.bytes = 0;
             fprintf(err, "cgrep: %s: %s\n", name, scan_error(result));
             return -1;
         }
@@ -1359,8 +1384,6 @@ static int search_input(const Search *search, const char *path, int walked, FILE
     return result.matched;
 }
 
-#include "parallel.inc"
-
 static int worker_count(const char *text)
 {
     int n;
@@ -1369,20 +1392,63 @@ static int worker_count(const char *text)
     if (*text == '\0')
         return 0;
     while (*text != '\0') {
-        if (*text < '0' || *text > '9' || n > 8)
+        if (*text < '0' || *text > '9' || n > 32)
             return 0;
         n = n * 10 + (*text++ - '0');
     }
-    return n >= 1 && n <= 8 ? n : 0;
+    return n >= 1 && n <= 32 ? n : 0;
 }
+
+/* Parse before clamping so overflowing values remain errors. */
+static int parse_depth(const char *text, unsigned long *depth)
+{
+    unsigned long n;
+    unsigned long digit;
+
+    n = 0;
+    if (*text == '+')
+        text++;
+    if (*text == '\0')
+        return 0;
+    while (*text != '\0') {
+        if (*text < '0' || *text > '9')
+            return 0;
+        digit = (unsigned long)(*text++ - '0');
+        if (n > (ULONG_MAX - digit) / 10)
+            return 0;
+        n = n * 10 + digit;
+    }
+    *depth = n;
+    return 1;
+}
+
+typedef struct {
+    int hidden;
+    int limited;
+    unsigned long max_depth;
+} WalkOptions;
 
 /* Inputs to search, in order: argument paths, and the files found under
  * directory arguments, which get the reference's handling of binary files
- * found while walking (see Search.walked). */
+ * found while walking (see Search.walked). With a worker pool the vectors
+ * are shared with the pool's threads, touched only under its mutex, and
+ * the lister adds to them in runs of INPUT_PENDING. */
+#define INPUT_PENDING 64
+typedef struct ParallelPool ParallelPool;
 typedef struct {
     CuVec paths;  /* char *, borrowed from argv or in the walk arena */
     CuVec walked; /* unsigned char, 1 for a path found by walking */
+    ParallelPool *pool; /* NULL: the caller searches after listing */
+    int stop;           /* the pool was cancelled: list no more */
+    int pending;
+    char *pending_paths[INPUT_PENDING];
+    unsigned char pending_walked[INPUT_PENDING];
 } Inputs;
+
+/* Appends the pending inputs to the pool's list. Zero means out of memory. */
+static int inputs_publish(Inputs *inputs);
+/* Whether the pool was cancelled; once it was, inputs->stop stays set. */
+static int inputs_cancelled(Inputs *inputs);
 
 static int entry_order(const void *a, const void *b)
 {
@@ -1402,9 +1468,16 @@ static int entry_order(const void *a, const void *b)
 
 static int add_input(Inputs *inputs, char *path, unsigned char walked)
 {
-    CU_VEC_PUSH(&inputs->paths, &path);
-    CU_VEC_PUSH(&inputs->walked, &walked);
-    return !cu_vec_failed(&inputs->paths) && !cu_vec_failed(&inputs->walked);
+    if (inputs->pool == NULL) {
+        CU_VEC_PUSH(&inputs->paths, &path);
+        CU_VEC_PUSH(&inputs->walked, &walked);
+        return !cu_vec_failed(&inputs->paths) && !cu_vec_failed(&inputs->walked);
+    }
+    inputs->pending_paths[inputs->pending] = path;
+    inputs->pending_walked[inputs->pending] = walked;
+    if (++inputs->pending < INPUT_PENDING)
+        return 1;
+    return inputs_publish(inputs);
 }
 
 /* dir, then '/' unless dir already ends with one, then name. */
@@ -1439,7 +1512,8 @@ static char *join_path(CuArena *a, const char *dir, CuStr name)
  * NULL). Reports each failure, an entry whose ignore rules exceed the
  * matching work limit among them (it is skipped), and returns 0, after
  * adding whatever else it could. */
-static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st)
+static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st,
+                const WalkOptions *options, unsigned depth)
 {
     CuDir d;
     CuDirEntry e;
@@ -1454,6 +1528,14 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     int ok;
     int verdict;
 
+    if (options->limited && (depth >= options->max_depth || depth >= 256))
+        return 1;
+    if (inputs->pool != NULL && (inputs->stop || inputs_cancelled(inputs)))
+        return 1;
+    if (depth > 256) {
+        fprintf(err, "cgrep: %s: directory nesting exceeds 256 levels\n", dir);
+        return 0;
+    }
     if (!cu_dir_open(&d, a, dir)) {
         fprintf(err, "cgrep: %s: %s\n", dir, cu_dir_errno(&d) == 0 ? "out of memory" : strerror(cu_dir_errno(&d)));
         return 0;
@@ -1465,7 +1547,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         listed |= ignore_listing_bit(e.name);
         if (e.kind != CU_DIR_FILE && e.kind != CU_DIR_DIR)
             continue;
-        if (st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
+        if (!options->hidden && st == NULL && e.name.len != 0 && e.name.ptr[0] == '.')
             continue;
         CU_VEC_PUSH(&entries, &e);
     }
@@ -1497,7 +1579,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
                 ok = 0;
                 continue;
             }
-            if (list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
+            if (!options->hidden && list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
                 continue;
         }
         if (list[i].kind == CU_DIR_FILE) {
@@ -1506,7 +1588,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
                 ok = 0;
                 break;
             }
-        } else if (!walk(a, path, inputs, err, st)) {
+        } else if (!walk(a, path, inputs, err, st, options, depth + 1)) {
             ok = 0;
         }
     }
@@ -1605,9 +1687,86 @@ static int directory_argument(const char *path)
     return r;
 }
 
+/* The path arguments and how to expand them into inputs. Everything here
+ * is used by whichever thread runs list_inputs. */
+typedef struct {
+    char **args;
+    const unsigned char *directories; /* per argument: list it as a directory */
+    int count;
+    int ignoring;
+    WalkOptions options;
+    IgnoreStack ignores;
+    CuArena *arena;
+    char *cwd;        /* room for the working directory, or NULL */
+    size_t cwd_size;
+    Inputs inputs;
+} Listing;
+
+/* Expands the arguments into inputs, in argument order, reporting walk
+ * failures on err. Returns 0 after any failure. */
+static int list_inputs(Listing *l, FILE *err)
+{
+    IgnoreDir unused_dir;
+    const char *config;
+    int global_read;
+    int failed;
+    int r;
+    int k;
+
+    global_read = 0;
+    failed = 0;
+    for (k = 0; k < l->count; k++) {
+        if (l->inputs.stop)
+            break;
+        if (!l->directories[k]) {
+            if (!add_input(&l->inputs, l->args[k], 0)) {
+                fputs("cgrep: out of memory listing inputs\n", err);
+                failed = 1;
+                break;
+            }
+            continue;
+        }
+        if (l->ignoring && !global_read) {
+            global_read = 1;
+            r = 1;
+#ifdef CGREP_GETCWD
+            l->ignores.cwd = l->cwd == NULL ? NULL : getcwd(l->cwd, l->cwd_size);
+#endif
+            config = getenv("XDG_CONFIG_HOME");
+            if (config != NULL && config[0] != '\0')
+                r = read_ignore(l->arena, config, "git/ignore", &l->ignores.global);
+            else if ((config = getenv("HOME")) != NULL && config[0] != '\0')
+                r = read_ignore(l->arena, config, ".config/git/ignore", &l->ignores.global);
+            if (!r) {
+                fputs("cgrep: out of memory reading ignore files\n", err);
+                failed = 1;
+                break;
+            }
+        }
+        if (l->ignoring && !push_ignore_parents(&l->ignores, l->args[k])) {
+            fputs("cgrep: out of memory reading ignore files\n", err);
+            failed = 1;
+            break;
+        }
+        if (!walk(l->arena, l->args[k], &l->inputs, err, l->ignoring ? &l->ignores : NULL, &l->options, 0))
+            failed = 1;
+        /* The next root has its own parents. */
+        while (CU_VEC_POP(&l->ignores.dirs, &unused_dir))
+            ;
+    }
+    if (l->inputs.pool != NULL && l->inputs.pending != 0 && !inputs_publish(&l->inputs)) {
+        fputs("cgrep: out of memory listing inputs\n", err);
+        failed = 1;
+    }
+    return !failed;
+}
+
+#include "parallel.inc"
+
 int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
 {
     Search s;
+    Listing listing;
     Finder finder;
     CuArena pattern_arena;
     CuArena input_arena;
@@ -1615,13 +1774,8 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     CuVec buffer;
     CuVec scratch;
     CuArena walk_arena;
-    Inputs inputs;
-    IgnoreStack ignores;
-    IgnoreDir unused_dir;
     char cwd[4096];
-    const char *config;
-    int ignoring;
-    int global_read;
+    unsigned char *directories;
     CuStr pattern;
     char *folded;
     char **paths;
@@ -1633,20 +1787,56 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     int matched;
     int failed;
     int jobs;
+    int stdin_named;
+    int directory_named;
     const char *flag;
 
     search_init(&s, out);
     s.finder = &finder;
-    ignoring = 1;
-    jobs = 1;
+    listing.options.hidden = 0;
+    listing.options.limited = 0;
+    listing.options.max_depth = 0;
+    listing.ignoring = 1;
+    jobs = 0;
     i = 1;
     while (i < argc && argv[i][0] == '-' && argv[i][1] != '\0') {
         if (strcmp(argv[i], "--") == 0) {
             i++;
             break;
         }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            fputs(usage, out);
+            fputs(help, out);
+            fputs(help_walk, out);
+            return fflush(out) != 0 || ferror(out) ? 2 : 0;
+        }
+        if (strcmp(argv[i], "--hidden") == 0) {
+            listing.options.hidden = 1;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--null") == 0) {
+            s.null = 1;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--max-depth") == 0 ||
+            strncmp(argv[i], "--max-depth=", 12) == 0) {
+            flag = argv[i];
+            if (argv[i][11] == '\0')
+                flag = i + 1 < argc ? argv[++i] : "";
+            else
+                flag += 12;
+            if (!parse_depth(flag, &listing.options.max_depth)) {
+                fputs("cgrep: max depth must be a non-negative integer in range\n", err);
+                return 2;
+            }
+            listing.options.limited = 1;
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--no-ignore") == 0) {
-            ignoring = 0;
+            listing.ignoring = 0;
             i++;
             continue;
         }
@@ -1657,7 +1847,14 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         /* Short flags cluster: -vn, -cj4. A value flag takes the rest of
          * its argument or, if that is empty, the next one. */
         for (flag = argv[i] + 1; *flag != '\0'; flag++) {
-            if (*flag == 'n') {
+            if (*flag == 'h') {
+                fputs(usage, out);
+                fputs(help, out);
+                fputs(help_walk, out);
+                return fflush(out) != 0 || ferror(out) ? 2 : 0;
+            } else if (*flag == '0') {
+                s.null = 1;
+            } else if (*flag == 'n') {
                 s.numbers = 1;
             } else if (*flag == 'c') {
                 s.count = 1;
@@ -1683,7 +1880,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
                 else
                     jobs = 0;
                 if (jobs == 0) {
-                    fputs("cgrep: worker count must be 1 through 8\n", err);
+                    fputs("cgrep: worker count must be 1 through 32\n", err);
                     return 2;
                 }
                 break;
@@ -1698,6 +1895,8 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         fputs(usage, err);
         return 2;
     }
+    if (jobs == 0)
+        jobs = default_workers();
     pattern = cu_str_cstr(argv[i++]);
     if (memchr(pattern.ptr, '\n', pattern.len) != NULL) {
         fputs("cgrep: a pattern cannot contain a newline\n", err);
@@ -1730,63 +1929,55 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     failed = 0;
     /* Directory arguments expand, in place, to the files under them. */
     cu_arena_init(&walk_arena);
-    CU_VEC_INIT(&inputs.paths, &walk_arena, char *);
-    CU_VEC_INIT(&inputs.walked, &walk_arena, unsigned char);
-    ignores.arena = &walk_arena;
-    CU_VEC_INIT(&ignores.dirs, &walk_arena, IgnoreDir);
-    ignores.global.rules = NULL;
-    ignores.global.count = 0;
-    ignores.cwd = NULL;
-    global_read = 0;
-    for (k = i; k < argc; k++) {
-        r = strcmp(argv[k], "-") != 0 && directory_argument(argv[k]);
-        if (r) {
-            s.names = 1;
-            if (ignoring && !global_read) {
-                global_read = 1;
-#ifdef CGREP_GETCWD
-                ignores.cwd = getcwd(cwd, sizeof cwd);
-#else
-                (void)cwd;
-#endif
-                config = getenv("XDG_CONFIG_HOME");
-                if (config != NULL && config[0] != '\0')
-                    r = read_ignore(&walk_arena, config, "git/ignore", &ignores.global);
-                else if ((config = getenv("HOME")) != NULL && config[0] != '\0')
-                    r = read_ignore(&walk_arena, config, ".config/git/ignore", &ignores.global);
-                if (!r) {
-                    fputs("cgrep: out of memory reading ignore files\n", err);
-                    failed = 1;
-                    break;
-                }
-            }
-            if (ignoring && !push_ignore_parents(&ignores, argv[k])) {
-                fputs("cgrep: out of memory reading ignore files\n", err);
-                failed = 1;
-                break;
-            }
-            if (!walk(&walk_arena, argv[k], &inputs, err, ignoring ? &ignores : NULL))
-                failed = 1;
-            /* The next root has its own parents. */
-            while (CU_VEC_POP(&ignores.dirs, &unused_dir))
-                ;
-        } else if (!add_input(&inputs, argv[k], 0)) {
-            fputs("cgrep: out of memory listing inputs\n", err);
-            failed = 1;
-            break;
-        }
-    }
-    count = (int)cu_vec_len(&inputs.paths);
-    paths = CU_VEC_DATA(&inputs.paths, char *);
-    walked = CU_VEC_DATA(&inputs.walked, unsigned char);
-    if (jobs > 1 && count > 1 && cu_vec_len(&inputs.paths) <= INT_MAX &&
-        parallel_search(&s, paths, walked, count, jobs, in, out, err, &r)) {
+    listing.args = argv + i;
+    listing.count = argc - i;
+    listing.arena = &walk_arena;
+    listing.cwd = cwd;
+    listing.cwd_size = sizeof cwd;
+    CU_VEC_INIT(&listing.inputs.paths, &walk_arena, char *);
+    CU_VEC_INIT(&listing.inputs.walked, &walk_arena, unsigned char);
+    listing.inputs.pool = NULL;
+    listing.inputs.stop = 0;
+    listing.inputs.pending = 0;
+    listing.ignores.arena = &walk_arena;
+    CU_VEC_INIT(&listing.ignores.dirs, &walk_arena, IgnoreDir);
+    listing.ignores.global.rules = NULL;
+    listing.ignores.global.count = 0;
+    listing.ignores.cwd = NULL;
+    directories = (unsigned char *)cu_arena_push_bytes(&walk_arena, listing.count == 0 ? 1 : (size_t)listing.count);
+    if (directories == NULL) {
+        fputs("cgrep: out of memory listing inputs\n", err);
         cu_arena_release(&walk_arena);
         cu_arena_release(&scratch_arena);
         cu_arena_release(&input_arena);
         cu_arena_release(&pattern_arena);
-        return failed ? 2 : r;
+        return 2;
     }
+    listing.directories = directories;
+    stdin_named = 0;
+    directory_named = 0;
+    for (k = 0; k < listing.count; k++) {
+        r = strcmp(listing.args[k], "-") == 0;
+        stdin_named |= r;
+        directories[k] = !r && directory_argument(listing.args[k]);
+        if (directories[k]) {
+            s.names = 1;
+            directory_named = 1;
+        }
+    }
+    if (jobs > 1 && !stdin_named && (directory_named || listing.count > 1) &&
+        parallel_search(&s, &listing, jobs, in, out, err, &r)) {
+        cu_arena_release(&walk_arena);
+        cu_arena_release(&scratch_arena);
+        cu_arena_release(&input_arena);
+        cu_arena_release(&pattern_arena);
+        return r;
+    }
+    if (!list_inputs(&listing, err))
+        failed = 1;
+    count = (int)cu_vec_len(&listing.inputs.paths);
+    paths = CU_VEC_DATA(&listing.inputs.paths, char *);
+    walked = CU_VEC_DATA(&listing.inputs.walked, unsigned char);
     if (i == argc) {
         r = search_input(&s, NULL, 0, in, err, &buffer);
         matched = r == 1;

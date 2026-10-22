@@ -445,6 +445,48 @@ static void ignore_work(void)
     remove_chain();
 }
 
+static void depth_guard(void)
+{
+    static const char *const args[] = {"--no-ignore", "alpha", "@h"};
+    static const char *const limited[] = {"--no-ignore", "--max-depth=999", "alpha", "@h"};
+    static const char *const zero[] = {"--max-depth", "0", "alpha", "@h/top"};
+    char rel[600];
+    char path[1200];
+    char expected[1600];
+    int depth;
+
+    make_dir("h");
+    make_file("h/top", "alpha\n", 6);
+    for (depth = 1; depth <= 260; depth++) {
+        chain_path(rel, depth, NULL);
+        make_dir(rel);
+    }
+    chain_path(rel, 256, "f");
+    make_file(rel, "alpha\n", 6);
+    chain_path(rel, 257, NULL);
+    sprintf(expected, "cgrep: %s/%s: directory nesting exceeds 256 levels\n", root, rel);
+    assert(run(3, args) == 2);
+    assert(strcmp(err_text, expected) == 0);
+    chain_path(rel, 256, "f");
+    sprintf(expected, "%s:alpha\nh/top:alpha\n", rel);
+    assert(strcmp(out_text, expected) == 0);
+    assert(run(4, limited) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, "h/top:alpha\n") == 0);
+    assert(run(4, zero) == 0 && strcmp(out_text, "alpha\n") == 0);
+    chain_path(rel, 256, "f");
+    sprintf(path, "%s/%s", root, rel);
+    assert(remove(path) == 0);
+    for (depth = 260; depth >= 0; depth--) {
+        chain_path(rel, depth, NULL);
+        if (depth == 0) {
+            sprintf(path, "%s/h/top", root);
+            assert(remove(path) == 0);
+        }
+        sprintf(path, "%s/%s", root, rel);
+        assert(remove(path) == 0);
+    }
+}
+
 int main(void)
 {
     static const char *const plain[] = {"alpha", "@r"};
@@ -560,6 +602,7 @@ int main(void)
     ignore_edges();
     ignore_globs();
     ignore_work();
+    depth_guard();
     remove_tree();
     printf("test_walk: PASS\n");
     return 0;

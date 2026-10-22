@@ -3,7 +3,9 @@
 The target is to meet the strongest valid GNU grep or ripgrep competitor on
 representative literal searches without weakening correctness, ordered output,
 error handling, linear search bounds, or memory limits. The target is unmet.
-Default execution remains serial; worker selection is explicit.
+Since the batched scheduler, the default worker count is one per online CPU
+(at most 32); see [the parallel design](PARALLEL-DESIGN.md) for the
+measurements that justified it. The sweeps below predate it.
 
 ## Installed build: sweep of 2026-10-15
 
