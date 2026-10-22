@@ -541,6 +541,8 @@ static void policy_cases(void)
     assert(claim_size(&pool, 3) == 3);
     pool.listed = 1;
     assert(claim_size(&pool, 64) == 3);
+    pool.next = 2;
+    assert(claim_size(&pool, 64) == 2);
     pool.next = 9;
     assert(claim_size(&pool, 64) == 1);
     pool.started = 1;
@@ -750,10 +752,16 @@ static void walk_cases(const char *directory)
     count_root = NULL;
     fault = F_NONE;
     fault_path = NULL;
-    /* The walker's diagnostics reach err through the coordinator. */
+    /* The walker's diagnostics reach err through the coordinator. Two
+     * unlistable directories, one before and one after the first
+     * publication of 64 inputs, so the second copy starts where the first
+     * ended. */
     if (geteuid() != 0) {
         FILE *serial_out;
+        char early[224];
 
+        assert(sprintf(early, "%s/a1x", root) > 0);
+        assert(mkdir(early, 0) == 0);
         assert(chmod(deep, 0) == 0);
         serial_out = tmpfile();
         out = tmpfile();
@@ -767,8 +775,11 @@ static void walk_cases(const char *directory)
         assert(creates == 5);
         same_file(out, serial_out);
         same_file(err, wanted);
+        rewind(wanted);
+        assert(fgetc(wanted) == 'c');
         assert(fclose(serial_out) == 0 && fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
         assert(chmod(deep, 0700) == 0);
+        assert(rmdir(early) == 0);
     }
     assert(fclose(expected) == 0 && fclose(expected_err) == 0);
     for (i = 0; i < 5; i++) {
