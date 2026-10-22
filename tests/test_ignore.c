@@ -6,8 +6,27 @@
 #include "cgrep.h"
 int cgrep_ignore_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #define cgrep_main cgrep_ignore_probe
+/* A small work limit (each rule tried still adds IGNORE_RULE_WORK): what
+ * matches within it here is far below the production limit, and what
+ * exceeds it shows the matcher doing work it need not. */
+#define IGNORE_WORK_LIMIT 16384UL
 #include "../src/cgrep.c"
 #undef cgrep_main
+
+static IgnoreWork work;
+
+static void fresh_work(void)
+{
+    work.left = IGNORE_WORK_LIMIT;
+    work.failed = 0;
+}
+
+/* file_verdict with a fresh budget; work tells what it cost. */
+static int verdict(const IgnoreFile *f, const char *rel, int is_dir)
+{
+    fresh_work();
+    return file_verdict(f, rel, strlen(rel), is_dir, &work);
+}
 
 static void init_stack(IgnoreStack *st, CuArena *a, const char *root_path)
 {
@@ -43,7 +62,8 @@ static void heap_component(const char *glob, const char *name, int expected)
     text = (char *)malloc(n);
     assert(text != NULL);
     memcpy(text, glob, n);
-    assert(glob_component(text, n, name, strlen(name)) == expected);
+    fresh_work();
+    assert(glob_component(text, n, name, strlen(name), &work) == expected);
     free(text);
 }
 
@@ -53,14 +73,16 @@ static void boundaries(void)
     IgnoreFile f;
     char *text;
 
-    assert(glob_component("[!a]", 4, "!", 1));
-    assert(glob_component("[^a]", 4, "[", 1));
-    assert(glob_component("\\*", 2, "*", 1));
-    assert(!glob_path("*a", 2, "b", 1));
-    assert(glob_path("*a", 2, "ba", 2));
-    assert(!glob_path("*a", 2, "", 0));
-    assert(!glob_path("sub/", 4, "sub/deep", 8));
-    assert(!glob_path("sub/", 4, "sub/x", 5));
+    fresh_work();
+    assert(glob_component("[!a]", 4, "!", 1, &work));
+    assert(glob_component("[^a]", 4, "[", 1, &work));
+    assert(glob_component("\\*", 2, "*", 1, &work));
+    assert(!glob_path("*a", 2, "b", 1, 0, &work));
+    assert(glob_path("*a", 2, "ba", 2, 0, &work));
+    assert(!glob_path("*a", 2, "", 0, 0, &work));
+    assert(!glob_path("sub/", 4, "sub/deep", 8, 0, &work));
+    assert(!glob_path("sub/", 4, "sub/x", 5, 0, &work));
+    assert(!work.failed);
     heap_component("foo*", "foox", 1);
     heap_component("[", "x", 0);
     heap_component("[a-", "a", 0);
@@ -71,7 +93,7 @@ static void boundaries(void)
     memcpy(text, "a\nb", 3);
     assert(parse_ignore(&a, cu_str_n(text, 3), &f));
     assert(f.count == 2 && f.rules[1].len == 1);
-    assert(file_verdict(&f, "b", 1, 0) == 1);
+    assert(verdict(&f, "b", 0) == 1);
     cu_arena_release(&a);
     free(text);
     cu_arena_init(&a);
@@ -86,8 +108,289 @@ static void boundaries(void)
     cu_arena_init(&a);
     assert(parse_ignore(&a, cu_str_cstr(" \n\r\n!\n/\n#comment\n"), &f) && f.count == 0);
     assert(parse_ignore(&a, cu_str_cstr("\\ \n"), &f));
-    assert(file_verdict(&f, " ", 1, 0) == 1);
-    assert(file_verdict(&f, "\\", 1, 0) == 0);
+    assert(verdict(&f, " ", 0) == 1);
+    assert(verdict(&f, "\\", 0) == 0);
+    cu_arena_release(&a);
+}
+
+/* n times unit, then tail, in a malloc'd string. */
+static char *repeated(const char *unit, size_t n, const char *tail)
+{
+    char *s;
+    size_t ul;
+    size_t i;
+
+    ul = strlen(unit);
+    s = (char *)malloc(n * ul + strlen(tail) + 1);
+    assert(s != NULL);
+    for (i = 0; i < n; i++)
+        memcpy(s + i * ul, unit, ul);
+    strcpy(s + n * ul, tail);
+    return s;
+}
+
+/* Repeated "**" components match what one does, as in git, in linear
+ * time: a chain of them against a deep path stays within the budget.
+ * Patterns that retry exponentially, or nest too deep, fail the verdict
+ * with a reported error instead of running for seconds. */
+static void double_star(void)
+{
+    static const struct {
+        const char *rules;
+        int expected;
+    } collapsing[] = {{"**/**/**/**/**/**/**/**/zzz\n", 0}, {"**/**/f\n", 1}, {"d/**/**/f\n", 1},
+        {"**/**\n", 1}, {"d/**/**\n", 1}, {"**/**/**/d/f\n", 1}, {"**/**/d\n", 0}, {"**/**/**/d\n", 0}};
+    CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
+    IgnoreFile f;
+    const char *error;
+    char *path;
+    char *glob;
+    char *text;
+    size_t i;
+
+    cu_arena_init(&a);
+    path = repeated("d/", 40, "f");
+    for (i = 0; i < sizeof collapsing / sizeof collapsing[0]; i++) {
+        assert(parse_ignore(&a, cu_str_cstr(collapsing[i].rules), &f));
+        assert(verdict(&f, path, 0) == collapsing[i].expected);
+        assert(!work.failed);
+    }
+    assert(parse_ignore(&a, cu_str_cstr("**/**/d\n"), &f));
+    assert(verdict(&f, "d", 1) == 1 && verdict(&f, "d/d", 1) == 1 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("**/d/**/d/**/d/**/d/**/d/**/d/**/d/**/zzz\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    /* Through the stack: no verdict, and the error says why. */
+    init_stack(&st, &a, "r");
+    init_dir(&d, "r", 0);
+    d.files[IG_IGNORE] = f;
+    CU_VEC_PUSH(&st.dirs, &d);
+    text = (char *)malloc(strlen(path) + 3);
+    assert(text != NULL);
+    sprintf(text, "r/%s", path);
+    error = "unset";
+    assert(ignore_verdict(&st, text, 0, &error) == 0);
+    assert(error != NULL && strcmp(error, "ignore rules exceed the matching work limit") == 0);
+    free(text);
+    free(path);
+    /* Each double star before "a" nests a retry: too many of them is the
+     * same failure, even for a path the glob would match straight down
+     * (its first retry at each level) within the budget. */
+    glob = repeated("**/a/", IGNORE_DEPTH_LIMIT + 2, "f\n");
+    path = repeated("a/", IGNORE_DEPTH_LIMIT + 2, "f");
+    assert(parse_ignore(&a, cu_str_cstr(glob), &f));
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    free(glob);
+    free(path);
+    cu_arena_release(&a);
+}
+
+/* A trailing space is escaped only by an odd run of backslashes, as git
+ * reads it: "a\\ " (two backslashes) is the glob "a\\", not "a\\ ". */
+static void trailing_space(void)
+{
+    CuArena a;
+    IgnoreFile f;
+
+    cu_arena_init(&a);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\ \n"), &f) && f.count == 1 && f.rules[0].len == 3);
+    assert(verdict(&f, "a\\", 0) == 1);
+    assert(verdict(&f, "a\\ ", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\  \n"), &f) && f.count == 1 && f.rules[0].len == 3);
+    assert(parse_ignore(&a, cu_str_cstr("a\\\\\\ \n"), &f) && f.count == 1 && f.rules[0].len == 5);
+    assert(verdict(&f, "a\\ ", 0) == 1);
+    assert(verdict(&f, "a\\", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("\\\\\n"), &f) && f.count == 1 && f.rules[0].len == 2);
+    assert(verdict(&f, "\\", 0) == 1);
+    cu_arena_release(&a);
+}
+
+/* An unanchored rule is one component (a glob with '/' is anchored), so
+ * only the final component can match it: it is matched there once, not
+ * retried at every '/' of a long path. */
+static void final_component(void)
+{
+    CuArena a;
+    IgnoreFile f;
+    char *path;
+
+    cu_arena_init(&a);
+    path = repeated("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/",
+        400, "f");
+    assert(parse_ignore(&a, cu_str_cstr("zzz\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("x*\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("f\n"), &f));
+    assert(verdict(&f, path, 0) == 1 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("*\n"), &f));
+    assert(verdict(&f, path, 0) == 1 && !work.failed);
+    free(path);
+    /* As before: the final component, whole; "**" alone matches all. */
+    assert(parse_ignore(&a, cu_str_cstr("b\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "a/b/c", 0) == 0 && verdict(&f, "a/bb", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 0 && verdict(&f, "b/a", 0) == 1 && verdict(&f, "a", 0) == 1);
+    assert(parse_ignore(&a, cu_str_cstr("**\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "a", 0) == 1);
+    assert(parse_ignore(&a, cu_str_cstr("b/\n"), &f));
+    assert(verdict(&f, "a/b", 1) == 1 && verdict(&f, "a/b", 0) == 0);
+    assert(parse_ignore(&a, cu_str_cstr("a/b\n"), &f));
+    assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "x/a/b", 0) == 0);
+    cu_arena_release(&a);
+}
+
+/* Each rule tried adds to the budget, so a file of many ordinary rules is
+ * matched in full. A single rule that retries exponentially is not. */
+static void rule_allowance(void)
+{
+    CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
+    IgnoreFile f;
+    const char *error;
+    char *text;
+    char *path;
+    char *rel;
+    size_t used;
+    int i;
+
+    cu_arena_init(&a);
+    text = (char *)malloc(2000 * 16);
+    assert(text != NULL);
+    used = 0;
+    for (i = 0; i < 2000; i++)
+        used += (size_t)sprintf(text + used, "*.ext%d\n", i);
+    assert(parse_ignore(&a, cu_str_n(text, used), &f) && f.count == 2000);
+    assert(verdict(&f, "sub/file.ext0", 0) == 1 && !work.failed);
+    assert(verdict(&f, "sub/file.c", 0) == 0 && !work.failed);
+    free(text);
+    /* The rules add a bounded amount: 2000 cheap ones (tried first, as
+     * later lines) do not let the hostile first line finish. */
+    text = (char *)malloc(2000 * 16 + 64);
+    assert(text != NULL);
+    used = (size_t)sprintf(text, "**/d/**/d/**/d/**/d/**/d/**/d/**/d/**/zzz\n");
+    for (i = 0; i < 2000; i++)
+        used += (size_t)sprintf(text + used, "*.ext%d\n", i);
+    assert(parse_ignore(&a, cu_str_n(text, used), &f) && f.count == 2001);
+    path = repeated("d/", 40, "f");
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    /* The global file is budgeted the same way: no verdict, an error. */
+    init_stack(&st, &a, "r");
+    init_dir(&d, "r", 1);
+    CU_VEC_PUSH(&st.dirs, &d);
+    st.global = f;
+    rel = (char *)malloc(strlen(path) + 3);
+    assert(rel != NULL);
+    sprintf(rel, "r/%s", path);
+    error = NULL;
+    assert(ignore_verdict(&st, rel, 0, &error) == 0 && error != NULL);
+    assert(strcmp(error, "ignore rules exceed the matching work limit") == 0);
+    free(rel);
+    free(path);
+    free(text);
+    cu_arena_release(&a);
+}
+
+/* The exact work of simple verdicts, from the cost model: one unit per
+ * rule, per matcher step and per retry, a component's length plus one to
+ * scan it. "**" then "/" then "b" against "a/b" tries zero components
+ * first (6), then retries after the '/' (6), with the glob and path scans
+ * around them; a repeated "**" costs one more to collapse. */
+static void costs(void)
+{
+    static const struct {
+        const char *rules;
+        const char *rel;
+        int expected;
+        unsigned long spent;
+    } cases[] = {{"b\n", "a/b", 1, 9}, {"a/b\n", "a/b", 1, 13}, {"**/b\n", "a/b", 1, 19},
+        {"**/**/b\n", "a/b", 1, 20}, {"**/**\n", "a/b", 1, 6}};
+    CuArena a;
+    IgnoreFile f;
+    size_t i;
+
+    cu_arena_init(&a);
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        assert(parse_ignore(&a, cu_str_cstr(cases[i].rules), &f));
+        assert(verdict(&f, cases[i].rel, 0) == cases[i].expected);
+        assert(work.left == IGNORE_WORK_LIMIT + IGNORE_RULE_WORK - cases[i].spent);
+    }
+    cu_arena_release(&a);
+}
+
+/* The matcher reads no byte past a glob or a path: a trailing "**" of
+ * exactly five bytes, and a path whose every '/' is retried, in buffers
+ * of their exact size. */
+static void exact_buffers(void)
+{
+    CuArena a;
+    IgnoreFile f;
+    char *text;
+    char *path;
+
+    cu_arena_init(&a);
+    text = (char *)malloc(5);
+    path = (char *)malloc(3);
+    assert(text != NULL && path != NULL);
+    memcpy(text, "**/**", 5);
+    memcpy(path, "a/b", 3);
+    assert(parse_ignore(&a, cu_str_n(text, 5), &f) && f.count == 1 && f.rules[0].len == 5);
+    fresh_work();
+    assert(file_verdict(&f, path, 3, 0, &work) == 1 && !work.failed);
+    memcpy(text, "**/zz", 5);
+    assert(parse_ignore(&a, cu_str_n(text, 5), &f) && f.count == 1);
+    fresh_work();
+    assert(file_verdict(&f, path, 3, 0, &work) == 0 && !work.failed);
+    free(text);
+    free(path);
+    cu_arena_release(&a);
+}
+
+/* Directories whose ignore files hold no rules take no part in a verdict,
+ * so thousands of them, above or below the root, cost nothing. One with
+ * a .git entry still bounds the git sources above it. */
+static void empty_frames(void)
+{
+    CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
+    const char *error;
+    size_t i;
+
+    cu_arena_init(&a);
+    init_stack(&st, &a, "r");
+    init_dir(&d, "/home", 0);
+    d.above = 1;
+    d.root_below = "r";
+    for (i = 0; i < 20000; i++)
+        CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r", 1);
+    assert(parse_ignore(&a, cu_str_cstr("*.log\n!keep.log\n"), &d.files[IG_GIT]));
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r/s", 0);
+    for (i = 0; i < 20000; i++)
+        CU_VEC_PUSH(&st.dirs, &d);
+    assert(!cu_vec_failed(&st.dirs));
+    assert(ignore_verdict(&st, "r/s/x.log", 0, &error) == 1 && error == NULL);
+    assert(ignore_verdict(&st, "r/s/keep.log", 0, &error) == -1 && error == NULL);
+    assert(ignore_verdict(&st, "r/s/x.txt", 0, &error) == 0 && error == NULL);
+    cu_arena_release(&a);
+    cu_arena_init(&a);
+    init_stack(&st, &a, "r");
+    init_dir(&d, "/", 0);
+    d.above = 1;
+    d.root_below = "home/r";
+    assert(parse_ignore(&a, cu_str_cstr("*.log\n"), &d.files[IG_GIT]));
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "/home", 1);
+    d.above = 1;
+    d.root_below = "r";
+    CU_VEC_PUSH(&st.dirs, &d);
+    init_dir(&d, "r", 0);
+    CU_VEC_PUSH(&st.dirs, &d);
+    assert(ignore_verdict(&st, "r/x.log", 0, &error) == 0 && error == NULL);
     cu_arena_release(&a);
 }
 
@@ -126,6 +429,7 @@ static void roots(void)
     CuArena a;
     IgnoreStack st;
     IgnoreDir d;
+    const char *error;
     size_t i;
 
     cu_arena_init(&a);
@@ -133,8 +437,8 @@ static void roots(void)
     init_dir(&d, "g", 1);
     assert(parse_ignore(&a, cu_str_cstr("*.log\n"), &d.files[IG_GIT]));
     CU_VEC_PUSH(&st.dirs, &d);
-    assert(ignore_verdict(&st, "g/a.log", 0) == 1);
-    assert(ignore_verdict(&st, "g/keep", 0) == 0);
+    assert(ignore_verdict(&st, "g/a.log", 0, &error) == 1 && error == NULL);
+    assert(ignore_verdict(&st, "g/keep", 0, &error) == 0 && error == NULL);
     cu_arena_release(&a);
     for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         cu_arena_init(&a);
@@ -142,21 +446,41 @@ static void roots(void)
         init_dir(&d, cases[i].root_path, 1);
         CU_VEC_PUSH(&st.dirs, &d);
         assert(parse_ignore(&a, cu_str_cstr(cases[i].pattern), &st.global));
-        assert(ignore_verdict(&st, cases[i].path, 0) == 1);
+        assert(ignore_verdict(&st, cases[i].path, 0, &error) == 1 && error == NULL);
         cu_arena_release(&a);
     }
 }
 
-static void ancestor_limit(void)
+/* "r/" then n bytes of 'x' with a '/' every 200th, in a malloc'd string. */
+static char *long_path(size_t n)
+{
+    char *path;
+    size_t i;
+
+    path = (char *)malloc(n + 3);
+    assert(path != NULL);
+    memcpy(path, "r/", 2);
+    for (i = 0; i < n; i++)
+        path[i + 2] = i % 200 == 199 ? '/' : 'x';
+    path[n + 2] = '\0';
+    return path;
+}
+
+/* An ancestor's rules see the path below it however long it is: an
+ * unanchored rule as well as an anchored one that needs the whole path,
+ * which is joined in the arena for the verdict. Without memory for it
+ * there is no verdict, and the error says so. */
+static void long_paths(void)
 {
     CuArena a;
     IgnoreStack st;
+    IgnoreDir *above;
     IgnoreDir d;
-    char path[4100];
+    const char *error;
+    char *path;
     size_t n;
-    size_t i;
 
-    cu_arena_init(&a);
+    cu_arena_init_with(&a, 4096, 0);
     init_stack(&st, &a, "r");
     init_dir(&d, "parent", 0);
     d.above = 1;
@@ -166,21 +490,38 @@ static void ancestor_limit(void)
     init_dir(&d, "r", 0);
     CU_VEC_PUSH(&st.dirs, &d);
     for (n = 4093; n <= 4095; n++) {
-        memcpy(path, "r/", 2);
-        for (i = 0; i < n; i++)
-            path[i + 2] = i % 200 == 199 ? '/' : 'x';
-        path[n + 2] = '\0';
-        assert(ignore_verdict(&st, path, 0) == (n == 4093 ? 1 : 0));
+        path = long_path(n);
+        assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+        free(path);
     }
+    path = long_path(12099);
+    assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+    above = CU_VEC_AT(&st.dirs, IgnoreDir, 0);
+    assert(parse_ignore(&a, cu_str_cstr("p/**\n"), &above->files[IG_IGNORE]));
+    assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+    assert(parse_ignore(&a, cu_str_cstr("q/**\n"), &above->files[IG_IGNORE]));
+    assert(ignore_verdict(&st, path, 0, &error) == 0 && error == NULL);
+    cu_arena_fail_at(&a, a.attempts);
+    error = NULL;
+    assert(ignore_verdict(&st, path, 0, &error) == 0);
+    assert(error != NULL && strcmp(error, "out of memory") == 0);
+    free(path);
     cu_arena_release(&a);
 }
 
 int main(void)
 {
     boundaries();
+    double_star();
+    trailing_space();
+    final_component();
+    empty_frames();
+    rule_allowance();
+    costs();
+    exact_buffers();
     failures();
     roots();
-    ancestor_limit();
+    long_paths();
     printf("test_ignore: PASS\n");
     return 0;
 }

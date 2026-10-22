@@ -56,8 +56,8 @@ make CUTILS=/path/to/c-utils
 ## Usage
 
 ```text
-cgrep [-cilnvw] [-j N] [--no-ignore] PATTERN [PATH...]
-cgrep --version
+cgrep [-0cilnvw] [-j N] [--hidden] [--no-ignore] [--max-depth N] PATTERN [PATH...]
+cgrep --help | --version
 ```
 
 **No path means stdin.** Pass `.` to search the current directory. A path
@@ -87,13 +87,17 @@ Newline patterns are rejected.
 
 | Option | Behavior |
 | --- | --- |
+| `-h`, `--help` | Print usage and option summaries to stdout, exit 0. |
+| `-0`, `--null` | Follow printed paths with NUL, including the terminator in `-l` mode. Binary warnings retain their usual separator. |
+| `--hidden` | Search dot files and directories while applying ignore rules. |
+| `--max-depth N`, `--max-depth=N` | Root depth is 0; depth 1 searches immediate files. Explicit files are always searched. |
 | `-n` | Add line numbers. |
 | `-i` | Ignore ASCII letter case. Non-ASCII letters are not case-folded. |
 | `-w` | Require no word character immediately before or after the match. |
 | `-v` | Select lines that do not match. |
 | `-c` | Print each input's count of selected lines. Omit zero counts. |
 | `-l` | Print the name of each input with a selected line. |
-| `-j N`, `-jN` | Request 1 through 8 workers. The default is serial. |
+| `-j N`, `-jN` | Use 1 through 32 workers. The default is one per online CPU, at most 32, where workers are available (Linux, glibc 2.34 or newer), else 1. |
 | `--no-ignore` | Disable ignore files. Discovered hidden names remain skipped. |
 | `--` | End option parsing. |
 | `--version` | Print the version and cgrep and c-utils source revisions. |
@@ -142,10 +146,18 @@ precedence. Ancestor ignore files above the search root also apply.
 
 `!` rules can unignore paths, including hidden names. Otherwise, discovered
 names beginning with `.` are skipped. Rules inside a pruned directory are
-not loaded. Unreadable ignore files are silently skipped.
+not loaded. Unreadable ignore files are silently skipped, as ripgrep does.
+
+Each entry's verdict has a matching work limit, which every rule tried
+extends, so large files of ordinary rules are matched in full. Adjacent
+`**` components match as one, as in Git, so chains of them stay linear;
+a pattern that still retries exponentially (several `**` separated by
+other components against a deep path) exceeds the limit. That entry is
+reported as `cgrep: PATH: ignore rules exceed the matching work limit`
+and skipped, and the search exits with status 2.
 
 `--no-ignore` disables these files, but does not enable hidden-name traversal.
-To search a hidden file directly, pass its filename explicitly.
+Combine it with `--hidden` to include hidden names, or pass a hidden file explicitly.
 
 The global file is `$XDG_CONFIG_HOME/git/ignore`, or
 `~/.config/git/ignore` when that environment variable is unset or empty.
@@ -154,16 +166,29 @@ inside bracket classes.
 
 ### Parallel searches
 
-Use `-j N` to opt into parallel regular-file searches on Linux with glibc
-2.34 or newer. Stdin stays serial. A path that turns out not to be a regular
-file is searched serially when its turn comes. Unsupported targets and an
-unavailable thread backend fall back to serial search. Other startup
-failures report status 2.
+On Linux with glibc 2.34 or newer, regular files are searched by up to `-j N`
+workers, by default one per online CPU (at most 32). Output order never
+depends on the worker count: files appear in argument order, with each
+directory's entries in byte order, depth first, exactly as at `-j1`.
 
-The pool joins all started workers before returning. Regular-file reads can
-delay cancellation, which workers check every eighth refill. Small matching
-files can be slower with workers. See the
-[performance status](docs/PERFORMANCE.md) before choosing a worker count.
+Workers start only as unclaimed inputs pile up (sixteen per worker), so a
+search of a few files or a small directory runs on the main thread and costs
+the same as `-j1`. Directory arguments are listed on a separate thread while
+workers search what is already listed. Each worker claims a batch of
+consecutive inputs, from one input up to 64 and about 4 MiB of input per
+claim, and hands its whole batch to the main thread in one step; the main
+thread writes batches in claim order, which is input order, and is the only
+writer of standard output and error. A walk failure is reported when the main
+thread next writes, so it may appear before or after nearby search output.
+
+Stdin stays serial. A path that turns out not to be a regular file is
+searched serially when its turn comes. Unsupported targets and an unavailable
+thread backend fall back to serial search; a worker that cannot start is
+reported with status 2 and the search continues with the workers that did.
+The pool joins every started thread before returning. Regular-file reads can
+delay cancellation, which workers check every eighth refill. See the
+[parallel design](docs/PARALLEL-DESIGN.md) for the measurements behind the
+default and the [performance status](docs/PERFORMANCE.md).
 
 ## Limits
 
@@ -175,8 +200,9 @@ files can be slower with workers. See the
 | Binary input | Printing stops with a warning once a match and a NUL have been observed. Earlier printed lines remain visible. `-c` drops binary inputs. |
 | Encoding | No BOM stripping or encoding conversion. CRLF is preserved. Matching final unterminated text lines receive a newline. |
 | Case and words | `-i` does not fold `é` to `É`. `-w` treats all non-ASCII characters as word characters, including punctuation. |
-| Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. |
-| Ancestor rules | Rules are skipped when the path relative to that ancestor exceeds 4095 bytes. Rules read inside the search root are not limited by this buffer. |
+| Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. A trailing space escaped by an odd run of backslashes is kept, as Git reads it; ripgrep 14 keeps it after any backslash. |
+| Ignore matching work | A verdict that exceeds the matching work limit (1,000,000 units plus 1,024 per rule tried, or `**` retries nested more than 256 deep) is an error for that entry: reported, skipped, status 2. |
+| Directory nesting | At most 256 levels below each root. Deeper directories report an error. An explicit maximum depth stops at min(N, 256) without error. |
 | Input size | Delivered-byte counters use `unsigned long`. Input beyond `ULONG_MAX` bytes reports an error instead of wrapping. |
 | Platforms | Native Windows and exotic integer-width ABIs remain unverified. |
 

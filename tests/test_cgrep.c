@@ -516,6 +516,31 @@ static void test_version(void)
     assert(strncmp(out_text, prefix, sizeof prefix - 1) == 0 && err_text[0] == '\0');
 }
 
+static void test_new_options(void)
+{
+    static const char *const help_long[] = {"--help"};
+    static const char *const help_short[] = {"-h"};
+    static const char *const invalid[] = {"--max-depth", ""};
+    static const char *const negative[] = {"--max-depth=-1", "alpha"};
+    static const char *const overflow[] = {"--max-depth=999999999999999999999999", "alpha"};
+    static const char *const junk[] = {"--max-depth=1x", "alpha"};
+    static const char *const missing[] = {"--max-depth"};
+    static const char *const valid[] = {"--max-depth=+0", "alpha"};
+
+    assert(run(NULL, 1, help_long) == 0 && err_text[0] == '\0');
+    assert(strncmp(out_text, "usage: cgrep", 12) == 0);
+    assert(strstr(out_text, "--hidden") != NULL);
+    assert(strstr(out_text, "1 through 32") != NULL);
+    assert(run(NULL, 1, help_short) == 0 && err_text[0] == '\0');
+    assert(strstr(out_text, "--max-depth N") != NULL);
+    assert(run(NULL, 2, invalid) == 2 && out_text[0] == '\0');
+    assert(run(NULL, 2, negative) == 2);
+    assert(run(NULL, 2, overflow) == 2);
+    assert(run(NULL, 2, junk) == 2);
+    assert(run(NULL, 1, missing) == 2);
+    assert(run(NULL, 2, valid) == 1 && err_text[0] == '\0');
+}
+
 int main(void)
 {
     const char *tmp;
@@ -535,6 +560,7 @@ int main(void)
     test_stdin();
     test_usage();
     test_version();
+    test_new_options();
 #ifndef __cerb__
     /* Under Cerberus these run in sem_flags.c, within their own time limit. */
     test_staged_output();

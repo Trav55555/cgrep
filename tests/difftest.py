@@ -86,7 +86,7 @@ def main() -> int:
     ap.add_argument("cgrep")
     ap.add_argument("--cases", type=int, default=400)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--jobs", type=int, choices=range(1, 9), default=1,
+    ap.add_argument("--jobs", type=int, choices=range(1, 33), default=1,
                     help="cgrep worker count; reference remains ordered rg -j1")
     args = ap.parse_args()
     cgrep = str(Path(args.cgrep).resolve())
@@ -112,6 +112,10 @@ def main() -> int:
         tree_files = [Path(tmp) / name for name in names[:12]]
         tree_dirs = []
         make_tree(rng, Path(tmp) / "tree", 0, tree_files, tree_dirs)
+        for relative in [".hidden/file", "deep/one/two/three/file"]:
+            path = Path(tmp) / "tree" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"a alpha\nbeta\n")
         roots = ["tree"] + [str(d.relative_to(tmp)) for d in tree_dirs[1:]] + ["tree/"]
         for case in range(args.cases):
             pattern = make_pattern(rng, files)
@@ -134,6 +138,12 @@ def main() -> int:
                 pattern = bytes(c ^ 32 if chr(c).isalpha() and rng.random() < 0.5 else c for c in pattern)
             if rng.random() < 0.15:
                 numbers += [rng.choice(["-w", "-wv", "-wc", "-iw"])]
+            if rng.random() < 0.3:
+                numbers += ["--null"]
+            if rng.random() < 0.4:
+                numbers += ["--hidden"]
+            if rng.random() < 0.4:
+                numbers += ["--max-depth", str(rng.randrange(6))]
             shape = rng.random()
             stdin = b""
             if shape < 0.2:

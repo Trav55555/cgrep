@@ -119,6 +119,44 @@ static void make_file(const char *rel, const char *data, size_t n)
     assert(f != NULL && fwrite(data, 1, n, f) == n && fclose(f) == 0);
 }
 
+/* h/a/a/.../a (CHAIN_DEPTH deep) ending in a file f, for ignore_work. */
+#define CHAIN_DEPTH 40
+/* Ordinary rules in one file, more than a verdict's base budget covers. */
+#define RULE_COUNT 50000
+
+static void chain_path(char *p, int depth, const char *leaf)
+{
+    int i;
+
+    strcpy(p, "h");
+    for (i = 0; i < depth; i++)
+        strcat(p, "/a");
+    if (leaf != NULL) {
+        strcat(p, "/");
+        strcat(p, leaf);
+    }
+}
+
+static void remove_chain(void)
+{
+    char rel[128];
+    char p[700];
+    int depth;
+
+    chain_path(rel, CHAIN_DEPTH, "f");
+    sprintf(p, "%s/%s", root, rel);
+    remove(p);
+    for (depth = CHAIN_DEPTH; depth >= 0; depth--) {
+        chain_path(rel, depth, NULL);
+        sprintf(p, "%s/%s", root, rel);
+        remove(p);
+    }
+    sprintf(p, "%s/h/.ignore", root);
+    remove(p);
+    sprintf(p, "%s/h", root);
+    remove(p);
+}
+
 static void remove_tree(void)
 {
     static const char *const files[] = {
@@ -150,6 +188,7 @@ static void remove_tree(void)
         sprintf(p, "%s/%s", root, dirs[i]);
         remove(p);
     }
+    remove_chain();
     remove(root);
     sprintf(p, "%s.in", root);
     remove(p);
@@ -215,6 +254,35 @@ static void ignore_files(void)
     assert(run(3, workers) == 0);
     assert(strcmp(out_text, expected) == 0 && err_text[0] == '\0');
 #ifndef __wasi__
+    /* An unreadable .gitignore, exclude or global file is skipped without a
+     * diagnostic, as the reference does (ripgrep 14.1.1 drops the error). */
+    {
+        static const char *const locked[] = {"g/.gitignore", "g/.git/info/exclude", "xdg/git/ignore"};
+        char p[600];
+        FILE *f;
+
+        sprintf(p, "%s/%s", root, locked[0]);
+        assert(chmod(p, 0) == 0);
+        f = fopen(p, "rb");
+        if (f != NULL) {
+            assert(fclose(f) == 0);
+        } else {
+            assert(errno == EACCES);
+            for (i = 1; i < sizeof locked / sizeof locked[0]; i++) {
+                sprintf(p, "%s/%s", root, locked[i]);
+                assert(chmod(p, 0) == 0);
+            }
+            assert(run(2, whole) == 0 && err_text[0] == '\0');
+            assert(strcmp(out_text, "g/a.log:alpha\ng/b.txt:alpha\ng/c.tmp:alpha\ng/keep.log:alpha\n"
+                                    "g/lib/keep.txt:alpha\ng/lib/other.txt:alpha\ng/out/o.txt:alpha\n"
+                                    "g/sub/c.log:alpha\ng/sub/y.txt:alpha\ng/sub/z.txt:alpha\ng/x.ex:alpha\n") == 0);
+        }
+        for (i = 0; i < sizeof locked / sizeof locked[0]; i++) {
+            sprintf(p, "%s/%s", root, locked[i]);
+            assert(chmod(p, 0600) == 0);
+        }
+        assert(run(2, whole) == 0 && strcmp(out_text, expected) == 0 && err_text[0] == '\0');
+    }
     assert(getcwd(cwd, sizeof cwd) != NULL && chdir(root) == 0);
     assert(run(2, relative) == 0 && strcmp(out_text, expected) == 0 && err_text[0] == '\0');
     assert(chdir(cwd) == 0);
@@ -333,6 +401,92 @@ static void ignore_globs(void)
     assert(strcmp(out_text, "e/sub/f\\o:alpha\ne/sub/foo:alpha\n") == 0);
 }
 
+/* Repeated "**" components match what one does, so a chain of them is
+ * matched in linear time, as git and the reference do. A pattern whose
+ * retries exceed the matching work limit is an error for the entry, which
+ * is then skipped: reported, with status 2, never silently searched. */
+static void ignore_work(void)
+{
+    static const char *const args[] = {"alpha", "@h"};
+    static const char collapsing[] = "**/**/**/**/**/**/**/**/zzz\n";
+    static const char hostile[] = "**/a/**/a/**/a/**/a/**/a/**/a/**/a/**/zzz\n";
+    char rel[128];
+    char expected[160];
+    char *rules;
+    size_t used;
+    int depth;
+    int i;
+
+    for (depth = 0; depth <= CHAIN_DEPTH; depth++) {
+        chain_path(rel, depth, NULL);
+        make_dir(rel);
+    }
+    chain_path(rel, CHAIN_DEPTH, "f");
+    make_file(rel, "alpha\n", 6);
+    sprintf(expected, "%s:alpha\n", rel);
+    make_file("h/.ignore", collapsing, sizeof collapsing - 1);
+    assert(run(2, args) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, expected) == 0);
+    make_file("h/.ignore", hostile, sizeof hostile - 1);
+    assert(run(2, args) == 2 && out_text[0] == '\0');
+    assert(strstr(err_text, "cgrep: ") != NULL && strstr(err_text, "/h/a") != NULL);
+    assert(strstr(err_text, "ignore rules exceed the matching work limit") != NULL);
+    /* A large file of ordinary rules is not hostile: each rule tried adds
+     * to the budget, so the work grows with the file, not against it. */
+    rules = (char *)malloc(RULE_COUNT * 16);
+    assert(rules != NULL);
+    used = 0;
+    for (i = 0; i < RULE_COUNT; i++)
+        used += sprintf(rules + used, "*.ext%d\n", i);
+    make_file("h/.ignore", rules, used);
+    free(rules);
+    assert(run(2, args) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, expected) == 0);
+    remove_chain();
+}
+
+static void depth_guard(void)
+{
+    static const char *const args[] = {"--no-ignore", "alpha", "@h"};
+    static const char *const limited[] = {"--no-ignore", "--max-depth=999", "alpha", "@h"};
+    static const char *const zero[] = {"--max-depth", "0", "alpha", "@h/top"};
+    char rel[600];
+    char path[1200];
+    char expected[1600];
+    int depth;
+
+    make_dir("h");
+    make_file("h/top", "alpha\n", 6);
+    for (depth = 1; depth <= 260; depth++) {
+        chain_path(rel, depth, NULL);
+        make_dir(rel);
+    }
+    chain_path(rel, 256, "f");
+    make_file(rel, "alpha\n", 6);
+    chain_path(rel, 257, NULL);
+    sprintf(expected, "cgrep: %s/%s: directory nesting exceeds 256 levels\n", root, rel);
+    assert(run(3, args) == 2);
+    assert(strcmp(err_text, expected) == 0);
+    chain_path(rel, 256, "f");
+    sprintf(expected, "%s:alpha\nh/top:alpha\n", rel);
+    assert(strcmp(out_text, expected) == 0);
+    assert(run(4, limited) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, "h/top:alpha\n") == 0);
+    assert(run(4, zero) == 0 && strcmp(out_text, "alpha\n") == 0);
+    chain_path(rel, 256, "f");
+    sprintf(path, "%s/%s", root, rel);
+    assert(remove(path) == 0);
+    for (depth = 260; depth >= 0; depth--) {
+        chain_path(rel, depth, NULL);
+        if (depth == 0) {
+            sprintf(path, "%s/h/top", root);
+            assert(remove(path) == 0);
+        }
+        sprintf(path, "%s/%s", root, rel);
+        assert(remove(path) == 0);
+    }
+}
+
 int main(void)
 {
     static const char *const plain[] = {"alpha", "@r"};
@@ -447,6 +601,8 @@ int main(void)
     ignore_files();
     ignore_edges();
     ignore_globs();
+    ignore_work();
+    depth_guard();
     remove_tree();
     printf("test_walk: PASS\n");
     return 0;
