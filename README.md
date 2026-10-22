@@ -142,7 +142,14 @@ precedence. Ancestor ignore files above the search root also apply.
 
 `!` rules can unignore paths, including hidden names. Otherwise, discovered
 names beginning with `.` are skipped. Rules inside a pruned directory are
-not loaded. Unreadable ignore files are silently skipped.
+not loaded. Unreadable ignore files are silently skipped, as ripgrep does.
+
+Each entry's verdict has a matching work limit. Adjacent `**` components
+match as one, as in Git, so chains of them stay linear; a pattern that
+still retries exponentially (several `**` separated by other components
+against a deep path) exceeds the limit. That entry is reported as
+`cgrep: PATH: ignore rules exceed the matching work limit` and skipped,
+and the search exits with status 2.
 
 `--no-ignore` disables these files, but does not enable hidden-name traversal.
 To search a hidden file directly, pass its filename explicitly.
@@ -175,8 +182,8 @@ files can be slower with workers. See the
 | Binary input | Printing stops with a warning once a match and a NUL have been observed. Earlier printed lines remain visible. `-c` drops binary inputs. |
 | Encoding | No BOM stripping or encoding conversion. CRLF is preserved. Matching final unterminated text lines receive a newline. |
 | Case and words | `-i` does not fold `é` to `É`. `-w` treats all non-ASCII characters as word characters, including punctuation. |
-| Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. |
-| Ancestor rules | Rules are skipped when the path relative to that ancestor exceeds 4095 bytes. Rules read inside the search root are not limited by this buffer. |
+| Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. A trailing space escaped by an odd run of backslashes is kept, as Git reads it; ripgrep 14 keeps it after any backslash. |
+| Ignore matching work | A verdict that exceeds the matching work limit (1,000,000 units, or `**` retries nested more than 256 deep) is an error for that entry: reported, skipped, status 2. |
 | Input size | Delivered-byte counters use `unsigned long`. Input beyond `ULONG_MAX` bytes reports an error instead of wrapping. |
 | Platforms | Native Windows and exotic integer-width ABIs remain unverified. |
 
