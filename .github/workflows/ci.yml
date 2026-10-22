@@ -62,6 +62,7 @@ jobs:
           make CUTILS=c-utils all test bench-test
           python3 -I tests/difftest.py build/cgrep
           python3 -I tests/ignore_difftest.py build/cgrep --cases 400
+          python3 -I tests/window_difftest.py build/cgrep --cases 400
 
       - name: Benchmark and render results
         run: |
