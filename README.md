@@ -97,7 +97,7 @@ Newline patterns are rejected.
 | `-v` | Select lines that do not match. |
 | `-c` | Print each input's count of selected lines. Omit zero counts. |
 | `-l` | Print the name of each input with a selected line. |
-| `-j N`, `-jN` | Request 1 through 32 workers. The default is serial. |
+| `-j N`, `-jN` | Use 1 through 32 workers. The default is one per online CPU, at most 32, where workers are available (Linux, glibc 2.34 or newer), else 1. |
 | `--no-ignore` | Disable ignore files. Discovered hidden names remain skipped. |
 | `--` | End option parsing. |
 | `--version` | Print the version and cgrep and c-utils source revisions. |
@@ -166,16 +166,29 @@ inside bracket classes.
 
 ### Parallel searches
 
-Use `-j N` to opt into parallel regular-file searches on Linux with glibc
-2.34 or newer. Stdin stays serial. A path that turns out not to be a regular
-file is searched serially when its turn comes. Unsupported targets and an
-unavailable thread backend fall back to serial search. Other startup
-failures report status 2.
+On Linux with glibc 2.34 or newer, regular files are searched by up to `-j N`
+workers, by default one per online CPU (at most 32). Output order never
+depends on the worker count: files appear in argument order, with each
+directory's entries in byte order, depth first, exactly as at `-j1`.
 
-The pool joins all started workers before returning. Regular-file reads can
-delay cancellation, which workers check every eighth refill. Small matching
-files can be slower with workers. See the
-[performance status](docs/PERFORMANCE.md) before choosing a worker count.
+Workers start only as unclaimed inputs pile up (sixteen per worker), so a
+search of a few files or a small directory runs on the main thread and costs
+the same as `-j1`. Directory arguments are listed on a separate thread while
+workers search what is already listed. Each worker claims a batch of
+consecutive inputs, from one input up to 64 and about 4 MiB of input per
+claim, and hands its whole batch to the main thread in one step; the main
+thread writes batches in claim order, which is input order, and is the only
+writer of standard output and error. A walk failure is reported when the main
+thread next writes, so it may appear before or after nearby search output.
+
+Stdin stays serial. A path that turns out not to be a regular file is
+searched serially when its turn comes. Unsupported targets and an unavailable
+thread backend fall back to serial search; a worker that cannot start is
+reported with status 2 and the search continues with the workers that did.
+The pool joins every started thread before returning. Regular-file reads can
+delay cancellation, which workers check every eighth refill. See the
+[parallel design](docs/PARALLEL-DESIGN.md) for the measurements behind the
+default and the [performance status](docs/PERFORMANCE.md).
 
 ## Limits
 

@@ -12,7 +12,8 @@
 #include <unistd.h>
 
 enum { F_NONE, F_POOL, F_WORKERS, F_ARENA, F_OPEN, F_STAT, F_FDOPEN,
-       F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO, F_REPLACE };
+       F_WINDOW, F_READ, F_CLOSE, F_SERIAL, F_FIFO, F_REPLACE, F_WALK, F_STOP,
+       F_MEMSTREAM, F_SERIAL_FAIL };
 static int fault;
 static int allocations;
 static int creates;
@@ -29,13 +30,26 @@ static const char *fault_path;
 static pthread_mutex_t race_mutex;
 static pthread_cond_t race_changed;
 static int race_ready;
+/* The pool of the current invocation (its first allocation) and what it
+ * recorded when freed. */
+static void *captured_pool;
+static unsigned long last_claims;
+static int last_started;
+static int subdir_opens; /* directories opened below count_root */
+static const char *count_root;
+static int test_batch_start = 1;
 
 static void *test_alloc(size_t n)
 {
+    void *p;
+
     allocations++;
     if (fault == F_POOL || (fault == F_WORKERS && allocations == 2))
         return NULL;
-    return malloc(n);
+    p = malloc(n);
+    if (allocations == 1)
+        captured_pool = p;
+    return p;
 }
 
 static int unavailable(void)
@@ -91,7 +105,7 @@ static int test_create(CuThread **t, CuArena *a, size_t stack_size,
     int ok;
 
     creates++;
-    assert(stack_size == (size_t)262144);
+    assert(stack_size == (size_t)262144 || stack_size == (size_t)1048576);
     if (unavailable())
         return 0;
     ok = cu_thread_start(t, a, stack_size, fn, context);
@@ -123,6 +137,11 @@ static int test_open(const char *path, int flags)
         }
         if (fault == F_SERIAL)
             return open("/tmp", flags);
+        if (fault == F_SERIAL_FAIL) {
+            /* Non-regular for the worker, unreadable for the coordinator. */
+            assert(chmod(path, 0) == 0);
+            return open("/tmp", flags);
+        }
         if (fault == F_FIFO) {
             assert(unlink(path) == 0);
             assert(mkfifo(path, 0600) == 0);
@@ -158,9 +177,21 @@ static FILE *test_fdopen(int fd, const char *mode)
     return fdopen(fd, mode);
 }
 
+static FILE *test_memstream(char **text, size_t *size)
+{
+    if (fault == F_MEMSTREAM) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return open_memstream(text, size);
+}
+
+static size_t reserve_calls;
+static size_t reserve_fail_at; /* 0: none; n: the nth reserve since set */
+
 static int test_reserve(CuVec *buffer, size_t extra)
 {
-    if (fault == F_WINDOW) {
+    if (fault == F_WINDOW || (reserve_fail_at != 0 && ++reserve_calls == reserve_fail_at)) {
         buffer->failed = 1;
         return 0;
     }
@@ -198,7 +229,11 @@ static int test_close(FILE *file)
 /* Two input chunks per slot: the same slot logic as the 1 MiB production
  * size, with fixtures small enough for valgrind's per-test time limit. */
 #define CHANNEL_BYTES 131072
+/* Every unclaimed input starts a worker, so small fixtures use workers. */
+#define CGREP_START_BACKLOG 1
+#define CGREP_BATCH_START test_batch_start
 #define CGREP_POOL_ALLOC test_alloc
+#define CGREP_POOL_FREE test_free
 #define cu_thread_start test_create
 #define cu_thread_join test_join
 #define cu_mutex_init test_mutex_init
@@ -211,6 +246,12 @@ static int test_close(FILE *file)
 #define cu_vec_reserve test_reserve
 #define cu_input_read test_read
 #define fclose test_close
+#define open_memstream test_memstream
+#define cu_dir_open test_dir_open
+/* The pool is defined by the included source; these hooks read it. */
+struct ParallelPool;
+static void test_free(void *p);
+static int test_dir_open(CuDir *d, CuArena *a, const char *path);
 #endif
 #define cgrep_main parallel_cli
 #include "../src/cgrep.c"
@@ -234,6 +275,42 @@ static int search_text(const Search *s, const char *name, CuStr text, unsigned l
 #undef cu_vec_reserve
 #undef cu_input_read
 #undef fclose
+#undef open_memstream
+#undef cu_dir_open
+
+static void test_free(void *p)
+{
+    ParallelPool *pool;
+
+    if (p == captured_pool) {
+        pool = (ParallelPool *)p;
+        last_claims = pool->claims;
+        last_started = pool->started;
+        captured_pool = NULL;
+    }
+    free(p);
+}
+
+/* Under F_WALK, listing fault_path waits until every input published so
+ * far has been claimed: the search is running while the walk is not
+ * finished. Under F_STOP, it waits for cancellation. */
+static int test_dir_open(CuDir *d, CuArena *a, const char *path)
+{
+    ParallelPool *pool;
+
+    if (fault_path != NULL && strcmp(path, fault_path) == 0 && (fault == F_WALK || fault == F_STOP)) {
+        pool = (ParallelPool *)captured_pool;
+        assert(pool != NULL);
+        cu_mutex_lock(pool->mutex);
+        while (fault == F_WALK ? !(pool->count > 0 && pool->next == pool->count) : !pool->cancel)
+            cu_cond_wait(pool->changed, pool->mutex);
+        cu_mutex_unlock(pool->mutex);
+    }
+    if (count_root != NULL && strncmp(path, count_root, strlen(count_root)) == 0 &&
+        path[strlen(count_root)] == '/')
+        subdir_opens++;
+    return cu_dir_open(d, a, path);
+}
 
 static int descriptors(void)
 {
@@ -267,21 +344,23 @@ static void same_file(FILE *a, FILE *b)
     assert(!ferror(a) && !ferror(b));
 }
 
-static int invoke(char **paths, const char *jobs, FILE *out, FILE *err)
+/* cgrep -n JOBS alpha PATHS..., with the pool's lifetime counters checked. */
+static int invoke(char **paths, int count, const char *jobs, FILE *out, FILE *err)
 {
-    char *args[9];
+    char *args[16];
     int result;
     int before;
+    int i;
 
+    assert(count <= 11);
     args[0] = (char *)"cgrep";
     args[1] = (char *)"-n";
-    args[2] = (char *)jobs;
-    args[3] = (char *)"alpha";
-    args[4] = paths[0];
-    args[5] = paths[1];
-    args[6] = paths[2];
-    args[7] = paths[3];
-    args[8] = NULL;
+    args[2] = (char *)"--no-ignore";
+    args[3] = (char *)jobs;
+    args[4] = (char *)"alpha";
+    for (i = 0; i < count; i++)
+        args[5 + i] = paths[i];
+    args[5 + count] = NULL;
     before = descriptors();
     allocations = 0;
     creates = 0;
@@ -292,13 +371,18 @@ static int invoke(char **paths, const char *jobs, FILE *out, FILE *err)
     conditions = 0;
     destroyed_conditions = 0;
     startup_attempts = 0;
+    captured_pool = NULL;
+    last_claims = 0;
+    last_started = 0;
+    subdir_opens = 0;
     cu_thread_fail_at(startup_failure);
-    result = parallel_cli(8, args, stdin, out, err);
+    result = parallel_cli(5 + count, args, stdin, out, err);
     cu_thread_fail_at((size_t)-1);
     assert(descriptors() == before);
     assert(started_threads == joined);
     assert(mutexes == destroyed_mutexes);
     assert(conditions == destroyed_conditions);
+    assert(captured_pool == NULL);
     return result;
 }
 
@@ -359,6 +443,8 @@ static void channel_fit_cases(void)
     free(worker);
 }
 
+/* Startup attempts for -j4: the mutex, the pool condition, then a
+ * condition and a thread per worker as the four listed inputs start them. */
 static void startup_cases(char **paths, FILE *expected, FILE *expected_err)
 {
     FILE *out;
@@ -369,18 +455,40 @@ static void startup_cases(char **paths, FILE *expected, FILE *expected_err)
     wanted = tmpfile();
     assert(wanted != NULL);
     assert(fprintf(wanted, "cgrep: worker startup: %s\n", strerror(EAGAIN)) > 0);
-    for (n = 0; n <= 9; n++) {
+    for (n = 0; n <= 10; n++) {
         startup_failure = n;
         out = tmpfile();
         err = tmpfile();
         assert(out != NULL && err != NULL);
-        assert(invoke(paths, "-j4", out, err) == (n < 9 ? 2 : 0));
-        assert(startup_attempts == (n < 9 ? n + 1 : 9));
-        if (n < 9) {
+        assert(invoke(paths, 4, "-j4", out, err) == (n < 10 ? 2 : 0));
+        assert(startup_attempts == (n < 10 ? n + 1 : 10));
+        if (n < 2) {
+            /* No scope: nothing searched. */
             rewind(out);
             assert(fgetc(out) == EOF);
             same_file(err, wanted);
-            assert(started_threads == (n < 5 ? 0 : (int)(n - 5)));
+            assert(started_threads == 0);
+        } else if (n < 10) {
+            /* A worker failed to start: reported, and the search goes on
+             * with the workers that did start, or inline with none. */
+            same_file(out, expected);
+            assert(started_threads == (int)(n - 2) / 2);
+            rewind(err);
+            rewind(wanted);
+            while (!feof(wanted)) {
+                int c = fgetc(wanted);
+                if (c == EOF)
+                    break;
+                assert(fgetc(err) == c);
+            }
+            rewind(expected_err);
+            while (!feof(expected_err)) {
+                int c = fgetc(expected_err);
+                if (c == EOF)
+                    break;
+                assert(fgetc(err) == c);
+            }
+            assert(fgetc(err) == EOF);
         } else {
             assert(started_threads == 4);
             same_file(out, expected);
@@ -391,14 +499,16 @@ static void startup_cases(char **paths, FILE *expected, FILE *expected_err)
     startup_failure = (size_t)-1;
     assert(fclose(wanted) == 0);
 
-    for (n = 0; n < 9; n++) {
+    /* An unavailable backend: serial before the scope, silently fewer
+     * workers inside it. */
+    for (n = 0; n < 10; n++) {
         unavailable_at = n;
         out = tmpfile();
         err = tmpfile();
         assert(out != NULL && err != NULL);
-        assert(invoke(paths, "-j4", out, err) == 0);
+        assert(invoke(paths, 4, "-j4", out, err) == 0);
         assert(startup_attempts == n + 1);
-        assert(started_threads == (n < 5 ? 0 : (int)(n - 5)));
+        assert(started_threads == (n < 2 ? 0 : (int)(n - 2) / 2));
         same_file(out, expected);
         same_file(err, expected_err);
         assert(fclose(out) == 0 && fclose(err) == 0);
@@ -406,11 +516,311 @@ static void startup_cases(char **paths, FILE *expected, FILE *expected_err)
     unavailable_at = (size_t)-1;
 }
 
+static void policy_cases(void)
+{
+    ParallelPool pool;
+
+    /* Claims double while inputs stay small, and shrink to what fits. */
+    assert(next_batch(1, 0, 1) == 2);
+    assert(next_batch(2, 2000, 2) == 4);
+    assert(next_batch(32, 64 * 1000, 32) == 64);
+    assert(next_batch(64, 64 * 1000, 64) == 64);
+    assert(next_batch(64, 64 * 1048576UL, 64) == 3);
+    assert(next_batch(4, 4 * 1048576UL, 4) == 3);
+    assert(next_batch(4, 4 * 4194304UL, 4) == 1);
+    assert(next_batch(1, 4194304UL * 8, 1) == 1);
+    assert(next_batch(8, 4194304UL, 8) == 7);
+    /* A claim takes what is available, and at most a fair share once the
+     * listing is complete. */
+    pool.count = 10;
+    pool.next = 0;
+    pool.listed = 0;
+    pool.started = 4;
+    pool.jobs = 4;
+    assert(claim_size(&pool, 64) == 10);
+    assert(claim_size(&pool, 3) == 3);
+    pool.listed = 1;
+    assert(claim_size(&pool, 64) == 3);
+    pool.next = 2;
+    assert(claim_size(&pool, 64) == 2);
+    pool.next = 9;
+    assert(claim_size(&pool, 64) == 1);
+    pool.started = 1;
+    pool.next = 0;
+    assert(claim_size(&pool, 64) == 10);
+    pool.next = 10;
+    assert(claim_size(&pool, 64) == 1);
+    assert(wanted_workers(&pool) == 0);
+    pool.next = 0;
+    pool.jobs = 32;
+    assert(wanted_workers(&pool) == 10);
+    pool.jobs = 2;
+    assert(wanted_workers(&pool) == 2);
+}
+
+/* Six files at -j2 with claims starting at three: once listed, a claim
+ * is at most the unclaimed share per worker, so the batches are the first
+ * three files, the next two and the last one. */
+static void batch_cases(char **paths)
+{
+    FILE *expected;
+    FILE *expected_err;
+    FILE *out;
+    FILE *err;
+    FILE *wanted;
+    int i;
+
+    for (i = 0; i < 6; i++)
+        write_fixture(paths[i], i == 1 ? 1 : i == 4 ? 2 : 0);
+    expected = tmpfile();
+    expected_err = tmpfile();
+    assert(expected != NULL && expected_err != NULL);
+    assert(invoke(paths, 6, "-j1", expected, expected_err) == 0);
+    test_batch_start = 3;
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    /* A large file in the first batch spills chunks; the small ones after
+     * it are recorded in the batch's last slot. */
+    assert(invoke(paths, 6, "-j2", out, err) == 0);
+    assert(last_claims >= 2 && last_claims <= 3 && last_started == 2);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    /* A non-regular input in the middle of a batch is searched by the
+     * coordinator at its position. */
+    fault = F_SERIAL;
+    fault_path = paths[1];
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 6, "-j2", out, err) == 0);
+    assert(last_claims >= 2 && last_claims <= 3);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    /* A non-regular input without a match is searched serially and is
+     * neither a match nor a failure. */
+    out = fopen(paths[5], "wb");
+    assert(out != NULL && fputs("beta only\n", out) >= 0 && fclose(out) == 0);
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 6, "-j1", out, err) == 0);
+    assert(fclose(expected) == 0 && fclose(expected_err) == 0);
+    expected = out;
+    expected_err = err;
+    fault = F_SERIAL;
+    fault_path = paths[5];
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 6, "-j2", out, err) == 0);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    write_fixture(paths[5], 0);
+    /* An unreadable input in a batch is reported at its position. */
+    fault = F_OPEN;
+    fault_path = paths[2];
+    out = tmpfile();
+    err = tmpfile();
+    wanted = tmpfile();
+    assert(out != NULL && err != NULL && wanted != NULL);
+    assert(invoke(paths, 6, "-j2", out, err) == 2);
+    assert(fprintf(wanted, "cgrep: %s: %s\n", paths[2], strerror(EACCES)) > 0);
+    same_file(err, wanted);
+    rewind(out);
+    assert(fgetc(out) != EOF);
+    assert(fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+    fault = F_NONE;
+    fault_path = NULL;
+    /* Output fails inside the first batch: cancelled, joined, status 2. */
+    out = fopen(paths[0], "rb");
+    err = tmpfile();
+    wanted = tmpfile();
+    assert(out != NULL && err != NULL && wanted != NULL);
+    alarm(15);
+    assert(invoke(paths, 6, "-j2", out, err) == 2);
+    alarm(0);
+    assert(fputs("cgrep: output error\n", wanted) >= 0);
+    same_file(err, wanted);
+    assert(fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+    test_batch_start = 1;
+    assert(fclose(expected) == 0 && fclose(expected_err) == 0);
+}
+
+/* A directory argument: listed on a walker thread while workers search. */
+static void walk_cases(const char *directory)
+{
+    char root[160];
+    char sub[192];
+    char deep[224];
+    char path[256];
+    char storage[256];
+    char *args[1];
+    char *roots[2];
+    FILE *expected;
+    FILE *expected_err;
+    FILE *out;
+    FILE *err;
+    FILE *wanted;
+    int i;
+
+    assert(sprintf(root, "%s/tree", directory) > 0);
+    assert(sprintf(sub, "%s/sub", root) > 0);
+    assert(sprintf(deep, "%s/deep", sub) > 0);
+    assert(mkdir(root, 0700) == 0 && mkdir(sub, 0700) == 0 && mkdir(deep, 0700) == 0);
+    /* 70 files before "sub" in byte order: the first publication of 64
+     * happens while the walk continues. */
+    for (i = 0; i < 70; i++) {
+        assert(sprintf(path, "%s/a%02d", root, i) > 0);
+        write_fixture(path, i == 7);
+    }
+    assert(sprintf(storage, "%s/a00", root) > 0);
+    for (i = 0; i < 5; i++) {
+        assert(sprintf(path, "%s/f%d", sub, i) > 0);
+        write_fixture(path, 0);
+        assert(sprintf(path, "%s/g%d", deep, i) > 0);
+        write_fixture(path, 0);
+    }
+    args[0] = root;
+    expected = tmpfile();
+    expected_err = tmpfile();
+    assert(expected != NULL && expected_err != NULL);
+    assert(invoke(args, 1, "-j1", expected, expected_err) == 0);
+    assert(creates == 0);
+    rewind(expected_err);
+    assert(fgetc(expected_err) == EOF);
+    /* Listing "sub" waits until the first 64 inputs are claimed, so the
+     * search ran before the walk finished; the output order still holds. */
+    fault = F_WALK;
+    fault_path = sub;
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    alarm(15);
+    assert(invoke(args, 1, "-j4", out, err) == 0);
+    alarm(0);
+    assert(creates == 5 && last_started == 4 && last_claims >= 2);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    /* Without a memory stream for the walker's diagnostics, the
+     * coordinator lists before searching. */
+    fault = F_MEMSTREAM;
+    fault_path = NULL;
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(args, 1, "-j4", out, err) == 0);
+    assert(creates == 4);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    /* The walker thread fails to start: reported, and the coordinator lists
+     * before searching. Unavailable: the same, silently. */
+    fault = F_NONE;
+    startup_failure = 2;
+    out = tmpfile();
+    err = tmpfile();
+    wanted = tmpfile();
+    assert(out != NULL && err != NULL && wanted != NULL);
+    assert(invoke(args, 1, "-j4", out, err) == 2);
+    assert(creates == 5 && started_threads == 4);
+    assert(fprintf(wanted, "cgrep: worker startup: %s\n", strerror(EAGAIN)) > 0);
+    same_file(out, expected);
+    same_file(err, wanted);
+    assert(fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+    startup_failure = (size_t)-1;
+    unavailable_at = 2;
+    out = tmpfile();
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(args, 1, "-j4", out, err) == 0);
+    assert(creates == 5 && started_threads == 4);
+    same_file(out, expected);
+    same_file(err, expected_err);
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    unavailable_at = (size_t)-1;
+    /* Output fails on the first batch; the walker stops listing once it
+     * notices the cancellation (here, when it enters "sub"), so the second
+     * root is never listed. A diagnostic written before that (an unlistable
+     * directory) still reaches err, after the output error. */
+    assert(sprintf(path, "%s/locked", root) > 0);
+    assert(mkdir(path, 0700) == 0);
+    if (geteuid() != 0)
+        assert(chmod(path, 0) == 0);
+    fault = F_STOP;
+    fault_path = sub;
+    count_root = root;
+    roots[0] = root;
+    roots[1] = root;
+    out = fopen(storage, "rb");
+    err = tmpfile();
+    wanted = tmpfile();
+    assert(out != NULL && err != NULL && wanted != NULL);
+    alarm(15);
+    assert(invoke(roots, 2, "-j4", out, err) == 2);
+    alarm(0);
+    assert(subdir_opens == (geteuid() != 0 ? 2 : 2));
+    assert(fputs("cgrep: output error\n", wanted) >= 0);
+    if (geteuid() != 0)
+        assert(fprintf(wanted, "cgrep: %s: %s\n", path, strerror(EACCES)) > 0);
+    same_file(err, wanted);
+    assert(fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+    assert(chmod(path, 0700) == 0 && rmdir(path) == 0);
+    count_root = NULL;
+    fault = F_NONE;
+    fault_path = NULL;
+    /* The walker's diagnostics reach err through the coordinator. Two
+     * unlistable directories, one before and one after the first
+     * publication of 64 inputs, so the second copy starts where the first
+     * ended. */
+    if (geteuid() != 0) {
+        FILE *serial_out;
+        char early[224];
+
+        assert(sprintf(early, "%s/a1x", root) > 0);
+        assert(mkdir(early, 0) == 0);
+        assert(chmod(deep, 0) == 0);
+        serial_out = tmpfile();
+        out = tmpfile();
+        err = tmpfile();
+        wanted = tmpfile();
+        assert(serial_out != NULL && out != NULL && err != NULL && wanted != NULL);
+        assert(invoke(args, 1, "-j1", serial_out, wanted) == 2);
+        rewind(wanted);
+        assert(fgetc(wanted) != EOF);
+        assert(invoke(args, 1, "-j4", out, err) == 2);
+        assert(creates == 5);
+        same_file(out, serial_out);
+        same_file(err, wanted);
+        rewind(wanted);
+        assert(fgetc(wanted) == 'c');
+        assert(fclose(serial_out) == 0 && fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+        assert(chmod(deep, 0700) == 0);
+        assert(rmdir(early) == 0);
+    }
+    assert(fclose(expected) == 0 && fclose(expected_err) == 0);
+    for (i = 0; i < 5; i++) {
+        assert(sprintf(path, "%s/f%d", sub, i) > 0);
+        assert(unlink(path) == 0);
+        assert(sprintf(path, "%s/g%d", deep, i) > 0);
+        assert(unlink(path) == 0);
+    }
+    for (i = 0; i < 70; i++) {
+        assert(sprintf(path, "%s/a%02d", root, i) > 0);
+        assert(unlink(path) == 0);
+    }
+    assert(rmdir(deep) == 0 && rmdir(sub) == 0 && rmdir(root) == 0);
+}
+
 static void native_cases(void)
 {
     char directory[] = "/tmp/cgrep-parallel-test.XXXXXX";
-    char storage[4][128];
-    char *paths[4];
+    char storage[6][128];
+    char *paths[6];
     FILE *expected;
     FILE *expected_err;
     FILE *out;
@@ -419,7 +829,7 @@ static void native_cases(void)
     int f;
 
     assert(mkdtemp(directory) != NULL);
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 6; i++) {
         assert(sprintf(storage[i], "%s/f%d", directory, i) > 0);
         paths[i] = storage[i];
         write_fixture(paths[i], i == 0 || i == 2);
@@ -427,14 +837,16 @@ static void native_cases(void)
     expected = tmpfile();
     expected_err = tmpfile();
     assert(expected != NULL && expected_err != NULL);
-    assert(invoke(paths, "-j1", expected, expected_err) == 0);
+    assert(invoke(paths, 4, "-j1", expected, expected_err) == 0);
     assert(creates == 0);
+    /* Every input starts a worker here, up to the job count. */
     for (i = 0; i < 3; i++) {
         out = tmpfile();
         err = tmpfile();
         assert(out != NULL && err != NULL);
-        assert(invoke(paths, i == 0 ? "-j2" : i == 1 ? "-j4" : "-j8", out, err) == 0);
-        assert(creates == (i == 0 ? 2 : 4));
+        assert(invoke(paths, 4, i == 0 ? "-j2" : i == 1 ? "-j4" : "-j8", out, err) == 0);
+        assert(creates == (i == 0 ? 2 : 4) && last_started == creates);
+        assert(last_claims >= 2 && last_claims <= 4);
         same_file(out, expected);
         same_file(err, expected_err);
         assert(fclose(out) == 0 && fclose(err) == 0);
@@ -444,7 +856,7 @@ static void native_cases(void)
     out = tmpfile();
     err = tmpfile();
     assert(out != NULL && err != NULL);
-    assert(invoke(paths, "-j1", out, err) == 0);
+    assert(invoke(paths, 4, "-j1", out, err) == 0);
     assert(fclose(expected) == 0 && fclose(expected_err) == 0);
     expected = out;
     expected_err = err;
@@ -452,7 +864,7 @@ static void native_cases(void)
         out = tmpfile();
         err = tmpfile();
         assert(out != NULL && err != NULL);
-        assert(invoke(paths, i == 0 ? "-j2" : "-j8", out, err) == 0);
+        assert(invoke(paths, 4, i == 0 ? "-j2" : "-j8", out, err) == 0);
         same_file(out, expected);
         same_file(err, expected_err);
         assert(fclose(out) == 0 && fclose(err) == 0);
@@ -465,7 +877,7 @@ static void native_cases(void)
     out = tmpfile();
     err = tmpfile();
     assert(out != NULL && err != NULL);
-    assert(invoke(paths, "-j4", out, err) == 0);
+    assert(invoke(paths, 4, "-j4", out, err) == 0);
     same_file(out, expected);
     same_file(err, expected_err);
     assert(fclose(out) == 0 && fclose(err) == 0);
@@ -478,7 +890,7 @@ static void native_cases(void)
         out = tmpfile();
         err = tmpfile();
         assert(out != NULL && err != NULL);
-        assert(invoke(paths, "-j4", out, err) == 2);
+        assert(invoke(paths, 4, "-j4", out, err) == 2);
         rewind(err);
         assert(fgetc(err) != EOF);
         if (f == F_STAT || f == F_READ || f == F_CLOSE) {
@@ -492,9 +904,13 @@ static void native_cases(void)
             same_file(err, wanted);
             assert(fclose(wanted) == 0);
         }
-        if (f <= F_ARENA) {
+        /* No pool, or no mutex: nothing searched. A worker that cannot be
+         * allocated leaves the search to those that could. */
+        if (f == F_POOL || f == F_ARENA) {
             rewind(out);
             assert(fgetc(out) == EOF);
+        } else if (f == F_WORKERS) {
+            same_file(out, expected);
         }
         if (f == F_OPEN) {
             rewind(out);
@@ -506,10 +922,64 @@ static void native_cases(void)
     out = tmpfile();
     err = tmpfile();
     assert(out != NULL && err != NULL);
-    assert(invoke(paths, "-j4", out, err) == 0);
+    assert(invoke(paths, 4, "-j4", out, err) == 0);
     same_file(out, expected);
     same_file(err, expected_err);
     assert(fclose(out) == 0 && fclose(err) == 0);
+    /* The coordinator's serial search of a non-regular input can fail. */
+    if (geteuid() != 0) {
+        FILE *wanted;
+
+        fault = F_SERIAL_FAIL;
+        out = tmpfile();
+        err = tmpfile();
+        wanted = tmpfile();
+        assert(out != NULL && err != NULL && wanted != NULL);
+        assert(invoke(paths, 4, "-j4", out, err) == 2);
+        assert(fprintf(wanted, "cgrep: %s: %s\n", paths[1], strerror(EACCES)) > 0);
+        same_file(err, wanted);
+        rewind(out);
+        assert(fgetc(out) != EOF);
+        assert(fclose(out) == 0 && fclose(err) == 0 && fclose(wanted) == 0);
+        assert(chmod(paths[1], 0600) == 0);
+    }
+    /* Without a scope, the serial loop stops at an output failure, which
+     * the input's own search reports first. */
+    fault = F_NONE;
+    out = fopen(paths[0], "rb");
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 4, "-j1", out, err) == 2);
+    {
+        FILE *wanted;
+
+        wanted = tmpfile();
+        assert(wanted != NULL);
+        assert(fprintf(wanted, "cgrep: %s: output error\ncgrep: output error\n", paths[0]) > 0);
+        same_file(err, wanted);
+        assert(fclose(wanted) == 0);
+    }
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    /* The only worker fails to start, so the coordinator searches inline,
+     * where the output fails. */
+    startup_failure = 3;
+    out = fopen(paths[0], "rb");
+    err = tmpfile();
+    assert(out != NULL && err != NULL);
+    assert(invoke(paths, 4, "-j4", out, err) == 2);
+    assert(started_threads == 0);
+    {
+        FILE *wanted;
+
+        wanted = tmpfile();
+        assert(wanted != NULL);
+        assert(fprintf(wanted, "cgrep: worker startup: %s\ncgrep: %s: output error\ncgrep: output error\n",
+                       strerror(EAGAIN), paths[0]) > 0);
+        same_file(err, wanted);
+        assert(fclose(wanted) == 0);
+    }
+    assert(fclose(out) == 0 && fclose(err) == 0);
+    startup_failure = (size_t)-1;
 
     /* A raced FIFO in a later slot must not trap cancellation or scope join. */
     fault = F_FIFO;
@@ -520,14 +990,19 @@ static void native_cases(void)
     err = tmpfile();
     assert(out != NULL && err != NULL);
     alarm(15);
-    assert(invoke(paths, "-j4", out, err) == 2);
+    assert(invoke(paths, 4, "-j4", out, err) == 2);
     alarm(0);
     fault = F_NONE;
+    fault_path = NULL;
     assert(pthread_cond_destroy(&race_changed) == 0);
     assert(pthread_mutex_destroy(&race_mutex) == 0);
     assert(fclose(out) == 0 && fclose(err) == 0);
     assert(fclose(expected) == 0 && fclose(expected_err) == 0);
-    for (i = 0; i < 4; i++)
+    /* The raced case left a FIFO behind. */
+    assert(unlink(paths[1]) == 0);
+    batch_cases(paths);
+    walk_cases(directory);
+    for (i = 0; i < 6; i++)
         assert(unlink(paths[i]) == 0);
     assert(rmdir(directory) == 0);
 }
@@ -626,6 +1101,145 @@ static void callback_cases(void)
     cu_arena_release(&arena);
 }
 
+#define SCAN_IN "/tmp/cgrep-parallel-scan.in"
+#define SCAN_OUT "/tmp/cgrep-parallel-scan.out"
+
+static int always_cancelled(void *context)
+{
+    (void)context;
+    return 1;
+}
+
+/* The scanner's error texts, and a counting scan with a fresh per-window
+ * finder that is cancelled before its first refill. */
+static void scanner_cases(void)
+{
+    CuArena arena;
+    CuArena scratch_arena;
+    CuVec buffer;
+    CuVec scratch;
+    Search search;
+    CuInput input;
+    ScanResult result;
+    FILE *file;
+
+    result.matched = 0;
+    result.system_error = 0;
+    result.bytes = 0;
+    result.error = SCAN_LINE_LIMIT;
+    assert(strcmp(scan_error(result), "line exceeds 8 MiB limit") == 0);
+    result.error = SCAN_RANGE;
+    assert(strcmp(scan_error(result), "input exceeds byte-offset range") == 0);
+    result.error = SCAN_CANCELLED;
+    assert(strcmp(scan_error(result), "cancelled") == 0);
+    result.error = SCAN_MEMORY;
+    assert(strcmp(scan_error(result), "out of memory") == 0);
+    result.error = SCAN_OUTPUT;
+    assert(strcmp(scan_error(result), "output error") == 0);
+    result.error = SCAN_IO;
+    assert(strcmp(scan_error(result), "input/output error") == 0);
+    result.error = SCAN_OK;
+    assert(strcmp(scan_error(result), "unknown error") == 0);
+
+    cu_arena_init(&arena);
+    CU_VEC_INIT(&buffer, &arena, char);
+    assert(literal_init(&search.literal, &arena, cu_str_cstr("alpha")));
+    search_init(&search, NULL);
+    search.count = 1;
+    search.finder = NULL;
+    search.cancelled = always_cancelled;
+    /* Named files: the portable build has no tmpfile. */
+    file = fopen(SCAN_IN, "w+b");
+    assert(file != NULL);
+    assert(fputs("alpha\nbeta\nalpha\n", file) >= 0);
+    rewind(file);
+    cu_input_attach(&input, file);
+    result = search_stream(&search, "f", &input, &buffer);
+    assert(result.error == SCAN_CANCELLED && !result.matched && result.bytes == 0);
+    assert(cu_input_close(&input));
+    rewind(file);
+    search.cancelled = NULL;
+    search.out = fopen(SCAN_OUT, "w+b");
+    assert(search.out != NULL);
+    cu_input_attach(&input, file);
+    result = search_stream(&search, "f", &input, &buffer);
+    assert(result.error == SCAN_OK && result.matched && result.bytes == 17);
+    assert(cu_input_close(&input));
+    rewind(search.out);
+    assert(fgetc(search.out) == '2' && fgetc(search.out) == '\n' && fgetc(search.out) == EOF);
+    /* A scratch vector that failed earlier is replaced before the scan,
+     * and a window larger than one chunk still refills by the chunk. */
+    cu_arena_init(&scratch_arena);
+    CU_VEC_INIT(&scratch, &scratch_arena, char);
+    scratch.failed = 1;
+    search.scratch = &scratch;
+    assert(cu_vec_reserve(&buffer, 3 * STREAM_CHUNK));
+    rewind(file);
+    rewind(search.out);
+    cu_input_attach(&input, file);
+    result = search_stream(&search, "f", &input, &buffer);
+    assert(result.error == SCAN_OK && result.matched && result.bytes == 17);
+    assert(!cu_vec_failed(&scratch));
+    assert(cu_input_close(&input));
+    rewind(search.out);
+    assert(fgetc(search.out) == '2' && fgetc(search.out) == '\n');
+#ifdef CGREP_NATIVE_PARALLEL
+    /* A read error during a counting scan. */
+    rewind(file);
+    cu_input_attach(&input, file);
+    fault = F_READ;
+    result = search_stream(&search, "f", &input, &buffer);
+    fault = F_NONE;
+    assert(result.error == SCAN_IO && result.system_error == EIO && !result.matched);
+    assert(!cu_input_close(&input));
+    /* Printing with -i folds a window into scratch; a failed growth there
+     * is out of memory for that input. */
+    search.count = 0;
+    search.fold = 1;
+    rewind(file);
+    cu_input_attach(&input, file);
+    reserve_calls = 0;
+    reserve_fail_at = 2;
+    result = search_stream(&search, "f", &input, &buffer);
+    reserve_fail_at = 0;
+    assert(result.error == SCAN_MEMORY && !result.matched);
+    assert(cu_input_close(&input));
+    search.fold = 0;
+    search.count = 1;
+#endif
+    /* The count's summary line can fail to be written. */
+    assert(fclose(search.out) == 0);
+    search.out = fopen(SCAN_OUT, "rb");
+    assert(search.out != NULL);
+    rewind(file);
+    cu_input_attach(&input, file);
+    result = search_stream(&search, "f", &input, &buffer);
+    assert(result.error == SCAN_OUTPUT && result.matched);
+    assert(cu_input_close(&input));
+    assert(fclose(search.out) == 0);
+    /* -i on a binary input: the refill holding the NUL is folded before
+     * the counting scan that decides whether to warn. */
+    assert(fclose(file) == 0);
+    file = fopen(SCAN_IN, "w+b");
+    search.out = fopen(SCAN_OUT, "w+b");
+    assert(file != NULL && search.out != NULL);
+    assert(fputs("beta\nALPHA\n", file) >= 0 && fputc('\0', file) != EOF && fputs("x\n", file) >= 0);
+    rewind(file);
+    search.count = 0;
+    search.fold = 1;
+    cu_input_attach(&input, file);
+    result = search_stream(&search, "f", &input, &buffer);
+    assert(result.error == SCAN_OK && result.matched);
+    assert(cu_input_close(&input));
+    rewind(search.out);
+    assert(fgetc(search.out) != EOF);
+    cu_arena_release(&scratch_arena);
+    assert(fclose(search.out) == 0);
+    assert(fclose(file) == 0);
+    assert(remove(SCAN_IN) == 0 && remove(SCAN_OUT) == 0);
+    cu_arena_release(&arena);
+}
+
 static void portable_options(void)
 {
     char *args[4];
@@ -652,6 +1266,20 @@ static void portable_options(void)
     assert(fputs("alpha\n", in) >= 0);
     rewind(in);
     assert(parallel_cli(3, args, in, out, err) == 0);
+    /* Long options and help, through the same parser. */
+    args[1] = (char *)"--hidden";
+    rewind(in);
+    assert(parallel_cli(3, args, in, out, err) == 0);
+    args[1] = (char *)"--null";
+    rewind(in);
+    assert(parallel_cli(3, args, in, out, err) == 0);
+    args[1] = (char *)"-0n";
+    rewind(in);
+    assert(parallel_cli(3, args, in, out, err) == 0);
+    args[1] = (char *)"-nh";
+    assert(parallel_cli(2, args, in, out, err) == 0);
+    rewind(out);
+    assert(fgetc(out) != EOF);
     assert(fclose(in) == 0 && fclose(out) == 0 && fclose(err) == 0);
     assert(remove("/tmp/cgrep-parallel-options.in") == 0);
     assert(remove("/tmp/cgrep-parallel-options.out") == 0);
@@ -674,8 +1302,10 @@ int main(int argc, char **argv)
     assert(worker_count("1x") == 0);
     portable_options();
     callback_cases();
+    scanner_cases();
 #ifdef CGREP_NATIVE_PARALLEL
     channel_fit_cases();
+    policy_cases();
     native_cases();
     puts("test_parallel: native PASS");
 #else
