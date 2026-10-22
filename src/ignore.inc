@@ -50,11 +50,40 @@ typedef struct {
     const char *root;     /* current search root, as walked */
 } IgnoreStack;
 
+/* Matching work one verdict may do: bytes scanned, retries and rules
+ * tried. A pattern that exhausts it (each "**" retries at every '/', so
+ * several of them cost a product of path depths) fails the verdict instead
+ * of running for seconds; the walk reports that. */
+#ifndef IGNORE_WORK_LIMIT
+#define IGNORE_WORK_LIMIT 1000000UL
+#endif
+/* Nested "**" retries recurse; deeper than this fails the same way. */
+#define IGNORE_DEPTH_LIMIT 256U
+
+typedef struct {
+    unsigned long left;
+    int failed;
+} IgnoreWork;
+
+static const char ignore_overrun[] = "ignore rules exceed the matching work limit";
+
+/* Spends n units of w, or fails it and returns 0. */
+static int ignore_charge(IgnoreWork *w, size_t n)
+{
+    if (w->left < n) {
+        w->left = 0;
+        w->failed = 1;
+        return 0;
+    }
+    w->left -= (unsigned long)n;
+    return 1;
+}
+
 /* One component of a gitignore glob against one path component: '*' and
  * '?' never match '/', '[...]' is a class ('!' or '^' negates, ranges,
  * literal backslashes), '\' escapes outside classes, and "**" inside a
  * component acts as '*'. */
-static int glob_component(const char *g, size_t gl, const char *s, size_t sl)
+static int glob_component(const char *g, size_t gl, const char *s, size_t sl, IgnoreWork *w)
 {
     size_t gi;
     size_t si;
@@ -74,9 +103,14 @@ static int glob_component(const char *g, size_t gl, const char *s, size_t sl)
     star_s = 0;
     have_star = 0;
     while (si < sl) {
+        if (!ignore_charge(w, 1))
+            return 0;
         if (gi < gl && g[gi] == '*') {
-            while (gi < gl && g[gi] == '*')
+            while (gi < gl && g[gi] == '*') {
+                if (!ignore_charge(w, 1))
+                    return 0;
                 gi++;
+            }
             have_star = 1;
             star_g = gi;
             star_s = si;
@@ -101,6 +135,8 @@ static int glob_component(const char *g, size_t gl, const char *s, size_t sl)
                     k++;
                 }
                 while (k < gl && g[k] != ']') {
+                    if (!ignore_charge(w, 1))
+                        return 0;
                     lo = (unsigned char)g[k];
                     hi = lo;
                     if (k + 2 < gl && g[k + 1] == '-' && g[k + 2] != ']') {
@@ -133,8 +169,11 @@ static int glob_component(const char *g, size_t gl, const char *s, size_t sl)
         gi = star_g;
         si = ++star_s;
     }
-    while (gi < gl && g[gi] == '*')
+    while (gi < gl && g[gi] == '*') {
+        if (!ignore_charge(w, 1))
+            return 0;
         gi++;
+    }
     return gi == gl;
 }
 
@@ -149,25 +188,44 @@ static size_t component_len(const char *p, size_t n)
 
 /* A glob against a '/'-separated relative path, component by component. A
  * "**" component matches zero or more path components; a trailing one, at
- * least one (it is only reached after a '/', with a component left). */
-static int glob_path(const char *g, size_t gl, const char *p, size_t pl)
+ * least one (it is only reached after a '/', with a component left). depth
+ * counts the "**" retries this call is nested in. */
+static int glob_path(const char *g, size_t gl, const char *p, size_t pl, unsigned depth, IgnoreWork *w)
 {
     size_t gc;
     size_t pc;
     size_t at;
 
+    if (depth > IGNORE_DEPTH_LIMIT) {
+        w->failed = 1;
+        return 0;
+    }
     for (;;) {
+        if (!ignore_charge(w, 1))
+            return 0;
         if (gl == 0)
             return pl == 0;
         gc = component_len(g, gl);
+        if (!ignore_charge(w, gc + 1))
+            return 0;
         if (gc == 2 && g[0] == '*' && g[1] == '*') {
+            /* Repeated "**" components match what one does (as in git);
+             * one keeps the retries below linear instead of exponential. */
+            while (gl >= 5 && g[3] == '*' && g[4] == '*' && (gl == 5 || g[5] == '/')) {
+                if (!ignore_charge(w, 1))
+                    return 0;
+                g += 3;
+                gl -= 3;
+            }
             if (gc == gl)
                 return 1;
             /* Zero components, then each later component boundary. */
-            if (glob_path(g + 3, gl - 3, p, pl))
+            if (glob_path(g + 3, gl - 3, p, pl, depth + 1, w))
                 return 1;
             for (at = 0; at < pl; at++) {
-                if (p[at] == '/' && glob_path(g + 3, gl - 3, p + at + 1, pl - at - 1))
+                if (!ignore_charge(w, 1))
+                    return 0;
+                if (p[at] == '/' && glob_path(g + 3, gl - 3, p + at + 1, pl - at - 1, depth + 1, w))
                     return 1;
             }
             return 0;
@@ -175,7 +233,9 @@ static int glob_path(const char *g, size_t gl, const char *p, size_t pl)
         if (pl == 0)
             return 0;
         pc = component_len(p, pl);
-        if (!glob_component(g, gc, p, pc))
+        if (!ignore_charge(w, pc + 1))
+            return 0;
+        if (!glob_component(g, gc, p, pc, w))
             return 0;
         if (gc == gl)
             return pc == pl;
@@ -188,10 +248,10 @@ static int glob_path(const char *g, size_t gl, const char *p, size_t pl)
     }
 }
 
-/* 1 if rel is ignored, -1 if un-ignored, 0 if no line matches: the last
- * matching line of f decides. Unanchored lines match any final run of
- * components, as "**" + "/" + line. */
-static int file_verdict(const IgnoreFile *f, const char *rel, size_t len, int is_dir)
+/* 1 if rel is ignored, -1 if un-ignored, 0 if no line matches (or w
+ * failed): the last matching line of f decides. Unanchored lines match any
+ * final run of components, as "**" + "/" + line. */
+static int file_verdict(const IgnoreFile *f, const char *rel, size_t len, int is_dir, IgnoreWork *w)
 {
     const IgnoreRule *r;
     size_t i;
@@ -199,14 +259,20 @@ static int file_verdict(const IgnoreFile *f, const char *rel, size_t len, int is
     int matched;
 
     for (i = f->count; i-- != 0;) {
+        if (!ignore_charge(w, 1))
+            return 0;
         r = &f->rules[i];
         if (r->dir_only && !is_dir)
             continue;
-        matched = glob_path(r->glob, r->len, rel, len);
+        matched = glob_path(r->glob, r->len, rel, len, 0, w);
         for (at = 0; !matched && !r->anchored && at < len; at++) {
+            if (!ignore_charge(w, 1))
+                return 0;
             if (rel[at] == '/')
-                matched = glob_path(r->glob, r->len, rel + at + 1, len - at - 1);
+                matched = glob_path(r->glob, r->len, rel + at + 1, len - at - 1, 0, w);
         }
+        if (w->failed)
+            return 0;
         if (matched)
             return r->negate ? -1 : 1;
     }
@@ -328,11 +394,13 @@ static unsigned ignore_listing_bit(CuStr name)
 }
 
 /* The verdict for path (as walked, ending in its name) under the stack:
- * 1 ignored, -1 un-ignored, 0 neither. */
-static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir)
+ * 1 ignored, -1 un-ignored, 0 neither. When the rules exceed the work
+ * limit there is none: 0, with *error set to say why; else *error is NULL. */
+static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, const char **error)
 {
     const IgnoreDir *dirs;
     const IgnoreDir *d;
+    IgnoreWork work;
     char relative_path[4096];
     const char *rel;
     const char *below;
@@ -346,6 +414,9 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir)
     int k;
     int v;
 
+    *error = NULL;
+    work.left = IGNORE_WORK_LIMIT;
+    work.failed = 0;
     dirs = CU_VEC_DATA(&st->dirs, IgnoreDir);
     n = cu_vec_len(&st->dirs);
     any_git = 0;
@@ -375,7 +446,11 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir)
         }
         for (k = 0; k < IG_KINDS; k++) {
             if (m[k] == 0 && (k < IG_GIT || (any_git && !saw_git)))
-                m[k] = file_verdict(&d->files[k], rel, len, is_dir);
+                m[k] = file_verdict(&d->files[k], rel, len, is_dir, &work);
+        }
+        if (work.failed) {
+            *error = ignore_overrun;
+            return 0;
         }
         saw_git |= d->has_git;
     }
@@ -392,6 +467,10 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir)
         rel += 2;
     else if (rel[0] == '/')
         rel++;
-    v = file_verdict(&st->global, rel, strlen(rel), is_dir);
+    v = file_verdict(&st->global, rel, strlen(rel), is_dir, &work);
+    if (work.failed) {
+        *error = ignore_overrun;
+        return 0;
+    }
     return v;
 }

@@ -1436,8 +1436,9 @@ static char *join_path(CuArena *a, const char *dir, CuStr name)
  * names in byte order, skipping symbolic links (never followed), other
  * non-regular entries, names that start with '.' unless an ignore file
  * un-ignores them, and anything an ignore file ignores (st, or none when
- * NULL). Reports each failure and returns 0, after adding whatever else
- * it could. */
+ * NULL). Reports each failure, an entry whose ignore rules exceed the
+ * matching work limit among them (it is skipped), and returns 0, after
+ * adding whatever else it could. */
 static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreStack *st)
 {
     CuDir d;
@@ -1445,6 +1446,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     CuDirEntry *list;
     CuVec entries;
     char *path;
+    const char *error;
     size_t count;
     size_t i;
     unsigned listed;
@@ -1489,7 +1491,12 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
             break;
         }
         if (st != NULL) {
-            verdict = ignore_verdict(st, path, list[i].kind == CU_DIR_DIR);
+            verdict = ignore_verdict(st, path, list[i].kind == CU_DIR_DIR, &error);
+            if (error != NULL) {
+                fprintf(err, "cgrep: %s: %s\n", path, error);
+                ok = 0;
+                continue;
+            }
             if (list[i].name.len != 0 && list[i].name.ptr[0] == '.' ? verdict != -1 : verdict == 1)
                 continue;
         }

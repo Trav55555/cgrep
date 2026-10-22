@@ -6,8 +6,27 @@
 #include "cgrep.h"
 int cgrep_ignore_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #define cgrep_main cgrep_ignore_probe
+/* A small work limit: what matches within it here is far below the
+ * production limit, and what exceeds it shows the matcher doing work it
+ * need not. */
+#define IGNORE_WORK_LIMIT 16384UL
 #include "../src/cgrep.c"
 #undef cgrep_main
+
+static IgnoreWork work;
+
+static void fresh_work(void)
+{
+    work.left = IGNORE_WORK_LIMIT;
+    work.failed = 0;
+}
+
+/* file_verdict with a fresh budget; work tells what it cost. */
+static int verdict(const IgnoreFile *f, const char *rel, int is_dir)
+{
+    fresh_work();
+    return file_verdict(f, rel, strlen(rel), is_dir, &work);
+}
 
 static void init_stack(IgnoreStack *st, CuArena *a, const char *root_path)
 {
@@ -43,7 +62,8 @@ static void heap_component(const char *glob, const char *name, int expected)
     text = (char *)malloc(n);
     assert(text != NULL);
     memcpy(text, glob, n);
-    assert(glob_component(text, n, name, strlen(name)) == expected);
+    fresh_work();
+    assert(glob_component(text, n, name, strlen(name), &work) == expected);
     free(text);
 }
 
@@ -53,14 +73,16 @@ static void boundaries(void)
     IgnoreFile f;
     char *text;
 
-    assert(glob_component("[!a]", 4, "!", 1));
-    assert(glob_component("[^a]", 4, "[", 1));
-    assert(glob_component("\\*", 2, "*", 1));
-    assert(!glob_path("*a", 2, "b", 1));
-    assert(glob_path("*a", 2, "ba", 2));
-    assert(!glob_path("*a", 2, "", 0));
-    assert(!glob_path("sub/", 4, "sub/deep", 8));
-    assert(!glob_path("sub/", 4, "sub/x", 5));
+    fresh_work();
+    assert(glob_component("[!a]", 4, "!", 1, &work));
+    assert(glob_component("[^a]", 4, "[", 1, &work));
+    assert(glob_component("\\*", 2, "*", 1, &work));
+    assert(!glob_path("*a", 2, "b", 1, 0, &work));
+    assert(glob_path("*a", 2, "ba", 2, 0, &work));
+    assert(!glob_path("*a", 2, "", 0, 0, &work));
+    assert(!glob_path("sub/", 4, "sub/deep", 8, 0, &work));
+    assert(!glob_path("sub/", 4, "sub/x", 5, 0, &work));
+    assert(!work.failed);
     heap_component("foo*", "foox", 1);
     heap_component("[", "x", 0);
     heap_component("[a-", "a", 0);
@@ -71,7 +93,7 @@ static void boundaries(void)
     memcpy(text, "a\nb", 3);
     assert(parse_ignore(&a, cu_str_n(text, 3), &f));
     assert(f.count == 2 && f.rules[1].len == 1);
-    assert(file_verdict(&f, "b", 1, 0) == 1);
+    assert(verdict(&f, "b", 0) == 1);
     cu_arena_release(&a);
     free(text);
     cu_arena_init(&a);
@@ -86,8 +108,80 @@ static void boundaries(void)
     cu_arena_init(&a);
     assert(parse_ignore(&a, cu_str_cstr(" \n\r\n!\n/\n#comment\n"), &f) && f.count == 0);
     assert(parse_ignore(&a, cu_str_cstr("\\ \n"), &f));
-    assert(file_verdict(&f, " ", 1, 0) == 1);
-    assert(file_verdict(&f, "\\", 1, 0) == 0);
+    assert(verdict(&f, " ", 0) == 1);
+    assert(verdict(&f, "\\", 0) == 0);
+    cu_arena_release(&a);
+}
+
+/* n times unit, then tail, in a malloc'd string. */
+static char *repeated(const char *unit, size_t n, const char *tail)
+{
+    char *s;
+    size_t ul;
+    size_t i;
+
+    ul = strlen(unit);
+    s = (char *)malloc(n * ul + strlen(tail) + 1);
+    assert(s != NULL);
+    for (i = 0; i < n; i++)
+        memcpy(s + i * ul, unit, ul);
+    strcpy(s + n * ul, tail);
+    return s;
+}
+
+/* Repeated "**" components match what one does, as in git, in linear
+ * time: a chain of them against a deep path stays within the budget.
+ * Patterns that retry exponentially, or nest too deep, fail the verdict
+ * with a reported error instead of running for seconds. */
+static void double_star(void)
+{
+    static const struct {
+        const char *rules;
+        int expected;
+    } collapsing[] = {{"**/**/**/**/**/**/**/**/zzz\n", 0}, {"**/**/f\n", 1}, {"d/**/**/f\n", 1},
+        {"**/**\n", 1}, {"d/**/**\n", 1}, {"**/**/**/d/f\n", 1}, {"**/**/d\n", 0}, {"**/**/**/d\n", 0}};
+    CuArena a;
+    IgnoreStack st;
+    IgnoreDir d;
+    IgnoreFile f;
+    const char *error;
+    char *path;
+    char *glob;
+    char *text;
+    size_t i;
+
+    cu_arena_init(&a);
+    path = repeated("d/", 40, "f");
+    for (i = 0; i < sizeof collapsing / sizeof collapsing[0]; i++) {
+        assert(parse_ignore(&a, cu_str_cstr(collapsing[i].rules), &f));
+        assert(verdict(&f, path, 0) == collapsing[i].expected);
+        assert(!work.failed);
+    }
+    assert(parse_ignore(&a, cu_str_cstr("**/**/d\n"), &f));
+    assert(verdict(&f, "d", 1) == 1 && verdict(&f, "d/d", 1) == 1 && !work.failed);
+    assert(parse_ignore(&a, cu_str_cstr("**/d/**/d/**/d/**/d/**/d/**/d/**/d/**/zzz\n"), &f));
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    /* Through the stack: no verdict, and the error says why. */
+    init_stack(&st, &a, "r");
+    init_dir(&d, "r", 0);
+    d.files[IG_IGNORE] = f;
+    CU_VEC_PUSH(&st.dirs, &d);
+    text = (char *)malloc(strlen(path) + 3);
+    assert(text != NULL);
+    sprintf(text, "r/%s", path);
+    error = "unset";
+    assert(ignore_verdict(&st, text, 0, &error) == 0);
+    assert(error != NULL && strcmp(error, "ignore rules exceed the matching work limit") == 0);
+    free(text);
+    free(path);
+    /* Each double star before "a" nests a retry: too many of them is the
+     * same failure. */
+    glob = repeated("**/a/", IGNORE_DEPTH_LIMIT + 2, "zzz\n");
+    path = repeated("a/", IGNORE_DEPTH_LIMIT + 2, "f");
+    assert(parse_ignore(&a, cu_str_cstr(glob), &f));
+    assert(verdict(&f, path, 0) == 0 && work.failed);
+    free(glob);
+    free(path);
     cu_arena_release(&a);
 }
 
@@ -126,6 +220,7 @@ static void roots(void)
     CuArena a;
     IgnoreStack st;
     IgnoreDir d;
+    const char *error;
     size_t i;
 
     cu_arena_init(&a);
@@ -133,8 +228,8 @@ static void roots(void)
     init_dir(&d, "g", 1);
     assert(parse_ignore(&a, cu_str_cstr("*.log\n"), &d.files[IG_GIT]));
     CU_VEC_PUSH(&st.dirs, &d);
-    assert(ignore_verdict(&st, "g/a.log", 0) == 1);
-    assert(ignore_verdict(&st, "g/keep", 0) == 0);
+    assert(ignore_verdict(&st, "g/a.log", 0, &error) == 1 && error == NULL);
+    assert(ignore_verdict(&st, "g/keep", 0, &error) == 0 && error == NULL);
     cu_arena_release(&a);
     for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         cu_arena_init(&a);
@@ -142,7 +237,7 @@ static void roots(void)
         init_dir(&d, cases[i].root_path, 1);
         CU_VEC_PUSH(&st.dirs, &d);
         assert(parse_ignore(&a, cu_str_cstr(cases[i].pattern), &st.global));
-        assert(ignore_verdict(&st, cases[i].path, 0) == 1);
+        assert(ignore_verdict(&st, cases[i].path, 0, &error) == 1 && error == NULL);
         cu_arena_release(&a);
     }
 }
@@ -152,6 +247,7 @@ static void ancestor_limit(void)
     CuArena a;
     IgnoreStack st;
     IgnoreDir d;
+    const char *error;
     char path[4100];
     size_t n;
     size_t i;
@@ -170,7 +266,7 @@ static void ancestor_limit(void)
         for (i = 0; i < n; i++)
             path[i + 2] = i % 200 == 199 ? '/' : 'x';
         path[n + 2] = '\0';
-        assert(ignore_verdict(&st, path, 0) == (n == 4093 ? 1 : 0));
+        assert(ignore_verdict(&st, path, 0, &error) == (n == 4093 ? 1 : 0) && error == NULL);
     }
     cu_arena_release(&a);
 }
@@ -178,6 +274,7 @@ static void ancestor_limit(void)
 int main(void)
 {
     boundaries();
+    double_star();
     failures();
     roots();
     ancestor_limit();
