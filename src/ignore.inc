@@ -434,7 +434,7 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
     const IgnoreDir *d;
     IgnoreWork work;
     CuTemp scratch;
-    char *joined;
+    char *ancestor_rel;
     const char *rel;
     const char *below;
     size_t below_len;
@@ -473,14 +473,14 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
         }
         if (d->above) {
             len = strlen(d->root_below);
-            if (!cu_size_add(len + 1, below_len, &total) || (joined = cu_arena_push_bytes(st->arena, total)) == NULL) {
+            if (!cu_size_add(len + 1, below_len, &total) || (ancestor_rel = cu_arena_push_bytes(st->arena, total)) == NULL) {
                 *error = "out of memory";
                 break;
             }
-            memcpy(joined, d->root_below, len);
-            joined[len] = '/';
-            memcpy(joined + len + 1, below, below_len);
-            rel = joined;
+            memcpy(ancestor_rel, d->root_below, len);
+            ancestor_rel[len] = '/';
+            memcpy(ancestor_rel + len + 1, below, below_len);
+            rel = ancestor_rel;
             len = total;
         } else {
             len = strlen(d->path);
