@@ -51,12 +51,15 @@ typedef struct {
 } IgnoreStack;
 
 /* Matching work one verdict may do: bytes scanned, retries and rules
- * tried. A pattern that exhausts it (each "**" retries at every '/', so
- * several of them cost a product of path depths) fails the verdict instead
- * of running for seconds; the walk reports that. */
+ * tried. Each rule tried adds IGNORE_RULE_WORK, so a large file of
+ * ordinary rules is matched in full; a pattern that exhausts the budget
+ * on its own (each "**" retries at every '/', so several of them cost a
+ * product of path depths) fails the verdict instead of running for
+ * seconds, and the walk reports that. */
 #ifndef IGNORE_WORK_LIMIT
 #define IGNORE_WORK_LIMIT 1000000UL
 #endif
+#define IGNORE_RULE_WORK 1024UL
 /* Nested "**" retries recurse; deeper than this fails the same way. */
 #define IGNORE_DEPTH_LIMIT 256U
 
@@ -66,6 +69,13 @@ typedef struct {
 } IgnoreWork;
 
 static const char ignore_overrun[] = "ignore rules exceed the matching work limit";
+
+/* Adds n units to w, unless it has already failed. */
+static void ignore_grant(IgnoreWork *w, unsigned long n)
+{
+    if (!w->failed)
+        w->left = w->left > ULONG_MAX - n ? ULONG_MAX : w->left + n;
+}
 
 /* Spends n units of w, or fails it and returns 0. */
 static int ignore_charge(IgnoreWork *w, size_t n)
@@ -264,6 +274,7 @@ static int file_verdict(const IgnoreFile *f, const char *rel, size_t len, int is
     base = NULL;
     base_len = 0;
     for (i = f->count; i-- != 0;) {
+        ignore_grant(w, IGNORE_RULE_WORK);
         if (!ignore_charge(w, 1))
             return 0;
         r = &f->rules[i];

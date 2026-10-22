@@ -6,9 +6,9 @@
 #include "cgrep.h"
 int cgrep_ignore_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #define cgrep_main cgrep_ignore_probe
-/* A small work limit: what matches within it here is far below the
- * production limit, and what exceeds it shows the matcher doing work it
- * need not. */
+/* A small work limit (each rule tried still adds IGNORE_RULE_WORK): what
+ * matches within it here is far below the production limit, and what
+ * exceeds it shows the matcher doing work it need not. */
 #define IGNORE_WORK_LIMIT 16384UL
 #include "../src/cgrep.c"
 #undef cgrep_main
@@ -175,8 +175,9 @@ static void double_star(void)
     free(text);
     free(path);
     /* Each double star before "a" nests a retry: too many of them is the
-     * same failure. */
-    glob = repeated("**/a/", IGNORE_DEPTH_LIMIT + 2, "zzz\n");
+     * same failure, even for a path the glob would match straight down
+     * (its first retry at each level) within the budget. */
+    glob = repeated("**/a/", IGNORE_DEPTH_LIMIT + 2, "f\n");
     path = repeated("a/", IGNORE_DEPTH_LIMIT + 2, "f");
     assert(parse_ignore(&a, cu_str_cstr(glob), &f));
     assert(verdict(&f, path, 0) == 0 && work.failed);
@@ -216,7 +217,7 @@ static void final_component(void)
 
     cu_arena_init(&a);
     path = repeated("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/",
-        200, "f");
+        400, "f");
     assert(parse_ignore(&a, cu_str_cstr("zzz\n"), &f));
     assert(verdict(&f, path, 0) == 0 && !work.failed);
     assert(parse_ignore(&a, cu_str_cstr("x*\n"), &f));
@@ -237,6 +238,29 @@ static void final_component(void)
     assert(verdict(&f, "a/b", 1) == 1 && verdict(&f, "a/b", 0) == 0);
     assert(parse_ignore(&a, cu_str_cstr("a/b\n"), &f));
     assert(verdict(&f, "a/b", 0) == 1 && verdict(&f, "x/a/b", 0) == 0);
+    cu_arena_release(&a);
+}
+
+/* Each rule tried adds to the budget, so a file of many ordinary rules is
+ * matched in full. A single rule that retries exponentially is not. */
+static void rule_allowance(void)
+{
+    CuArena a;
+    IgnoreFile f;
+    char *text;
+    size_t used;
+    int i;
+
+    cu_arena_init(&a);
+    text = (char *)malloc(2000 * 16);
+    assert(text != NULL);
+    used = 0;
+    for (i = 0; i < 2000; i++)
+        used += (size_t)sprintf(text + used, "*.ext%d\n", i);
+    assert(parse_ignore(&a, cu_str_n(text, used), &f) && f.count == 2000);
+    assert(verdict(&f, "sub/file.ext0", 0) == 1 && !work.failed);
+    assert(verdict(&f, "sub/file.c", 0) == 0 && !work.failed);
+    free(text);
     cu_arena_release(&a);
 }
 
@@ -408,6 +432,7 @@ int main(void)
     trailing_space();
     final_component();
     empty_frames();
+    rule_allowance();
     failures();
     roots();
     long_paths();

@@ -121,6 +121,8 @@ static void make_file(const char *rel, const char *data, size_t n)
 
 /* h/a/a/.../a (CHAIN_DEPTH deep) ending in a file f, for ignore_work. */
 #define CHAIN_DEPTH 40
+/* Ordinary rules in one file, more than a verdict's base budget covers. */
+#define RULE_COUNT 50000
 
 static void chain_path(char *p, int depth, const char *leaf)
 {
@@ -410,7 +412,10 @@ static void ignore_work(void)
     static const char hostile[] = "**/a/**/a/**/a/**/a/**/a/**/a/**/a/**/zzz\n";
     char rel[128];
     char expected[160];
+    char *rules;
+    size_t used;
     int depth;
+    int i;
 
     for (depth = 0; depth <= CHAIN_DEPTH; depth++) {
         chain_path(rel, depth, NULL);
@@ -426,6 +431,17 @@ static void ignore_work(void)
     assert(run(2, args) == 2 && out_text[0] == '\0');
     assert(strstr(err_text, "cgrep: ") != NULL && strstr(err_text, "/h/a") != NULL);
     assert(strstr(err_text, "ignore rules exceed the matching work limit") != NULL);
+    /* A large file of ordinary rules is not hostile: each rule tried adds
+     * to the budget, so the work grows with the file, not against it. */
+    rules = (char *)malloc(RULE_COUNT * 16);
+    assert(rules != NULL);
+    used = 0;
+    for (i = 0; i < RULE_COUNT; i++)
+        used += sprintf(rules + used, "*.ext%d\n", i);
+    make_file("h/.ignore", rules, used);
+    free(rules);
+    assert(run(2, args) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, expected) == 0);
     remove_chain();
 }
 
