@@ -644,10 +644,15 @@ static int drain_slot(const Search *search, ParallelSlot *slot, FILE *in, FILE *
     return fflush(out) == 0 && !ferror(out);
 }
 
-/* Serial until the batched scheduler's measurements justify more. */
+/* The online processors, at most MAX_WORKERS; one when that is unknown. */
 static int default_workers(void)
 {
-    return 1;
+    long n;
+
+    n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n < 1)
+        return 1;
+    return n > MAX_WORKERS ? MAX_WORKERS : (int)n;
 }
 
 enum { COORDINATE_DONE, COORDINATE_START, COORDINATE_INLINE, COORDINATE_BATCH };

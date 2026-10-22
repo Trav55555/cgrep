@@ -19,12 +19,14 @@
  * Exit status: 0 if any line matched, 1 if none did, 2 if any error
  * occurred. Input failures are reported on err and later paths searched;
  * observed output failures stop serial input or cancel prefetched workers.
- * Explicit -j1 through -j8 preserve argv-order output; default is serial.
- * Linux/glibc >= 2.34 regular-file workers have private input windows and
- * two bounded 1 MiB output slots each. Other targets, stdin and nonregular
- * inputs stay serial. Every started worker is joined before returning; a regular
- * file read may delay cancellation. POSIX SIGPIPE may terminate the CLI
- * instead of returning 2. Earlier output is not rolled back.
+ * Output keeps input order at every -j; the default is the online CPU
+ * count, at most 32, where Linux/glibc >= 2.34 workers exist, else 1.
+ * Workers start as listed inputs pile up, claim batches of consecutive
+ * regular files, and have private input windows and two bounded 1 MiB
+ * output slots each. Other targets, stdin and nonregular inputs stay
+ * serial. Every started thread is joined before returning; a regular file
+ * read may delay cancellation. POSIX SIGPIPE may terminate the CLI instead
+ * of returning 2. Earlier output is not rolled back.
  */
 #ifndef CGREP_H
 #define CGREP_H

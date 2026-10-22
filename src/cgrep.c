@@ -68,7 +68,8 @@ static const char help[] =
     "  -v             Select non-matching lines.\n"
     "  -c             Print selected-line counts.\n"
     "  -l             Print matching file paths.\n"
-    "  -j N           Use 1 through 32 workers (default 1).\n";
+    "  -j N           Use 1 through 32 workers (default: online CPUs, at most 32;\n"
+    "                 1 where no worker backend exists).\n";
 static const char help_walk[] =
     "  --hidden       Search hidden names, respecting ignore rules.\n"
     "  --no-ignore    Disable ignore files.\n"

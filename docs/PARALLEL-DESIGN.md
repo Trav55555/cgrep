@@ -6,8 +6,9 @@ The caller is `cgrep_main`: it prepares an immutable literal, scans explicit
 paths, continues after input errors, stops after observed output failure, and
 releases arenas only after work ends. `search_stream` owns no input lifetime.
 Preserve the current serial stdin/non-regular behavior. `-j` accepts 1
-through 32, separated or joined; default selection remains serial until the
-batched scheduler below is measured against the serial path.
+through 32, separated or joined. The default was serial until the batched
+scheduler below was measured; it is now one worker per online CPU, at most
+32 (see [Default worker count](#default-worker-count)).
 
 ## Alternatives and decision
 
@@ -138,6 +139,49 @@ before (fixed lanes) and after (batches), both with explicit `-j`:
 `strace -f -c` on the 100,000-file search at `-j8`: 300k futex calls and
 200k fstat before; 7.6k futex, no fstat, 100k fcntl after (508k calls in
 all against 500k at `-j1`).
+
+### Default worker count
+
+The default changed from 1 to the online CPU count (at most 32) because,
+with that default (12 here, median of 9 and of 21 warm runs for the small
+cases), every condition held: one small file 0.43 ms against 0.45-0.50 at
+`-j1` and ten small files 0.48 against 0.46-0.47 (both inside 5%, since
+neither starts a worker); the 100,000-file directory 101 ms against 507;
+the 9,331-directory tree 68 against 245; the cgrep source tree 3.9 against
+4.1-4.5; and /usr/include 5.6 against 30.5. CPU time rises with workers
+(680 ms against 507 on the flat directory), which is the price of the wall
+time.
+
+Measured on 16 x 4 MiB mixed-text files with about 1.5 MiB of output each,
+64 KiB single channels left `-j8` slower than serial; 256 KiB slots took
+27.6 ms and 1 MiB slots 13.7 ms (see
+[the performance review](PERFORMANCE-REVIEW-20261014.md)). Eight workers
+reserve 16 MiB of slots, which the kernel commits only as output fills them.
+
+The worker opens with nonblocking flags and verifies the descriptor is regular.
+A raced non-regular path requests serial handling only when the coordinator
+reaches that argument. This prevents a prefetched FIFO from trapping shutdown.
+Worker-owned FILE inputs attach a borrowed CuInput, detach it, then close the
+FILE explicitly, preserving the scanner's first failure.
+
+## Synchronous fragment batches
+
+The unpublished writer sends one record's borrowed fragments through one
+callback, at most five for a text line or three for a binary warning. The
+callback consumes descriptors and data before returning; stack prefixes and
+warnings never escape. It still reports zero on failure and stops scanning.
+
+A preflight checks each length against `room - total` before adding it. If the
+whole record fits, the worker copies nonempty fragments and updates its used
+length once; one-byte fragments use direct stores. An exact fill remains
+private until the existing lazy publication or terminal completion. If any
+fragment does not fit, the original splitting/publication loop handles the
+entire record without prior writes. Zero-length fragments may have null pointers.
+
+This changes local copying only. Channel ownership, coordinator locking,
+ordered acknowledgment, output flushing, cancellation, joins, and capacity
+remain unchanged. Boundary/failure fixtures and compiled mutants exercise the
+new paths; [verification](../verification.md) records the full acceptance.
 
 ## Verification gates
 
