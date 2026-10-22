@@ -960,6 +960,14 @@ typedef struct {
     unsigned long selected;
 } LineScan;
 
+/* The start of the line holding offset at, not before pos. */
+static size_t line_start(CuStr w, size_t pos, size_t at)
+{
+    while (at > pos && w.ptr[at - 1] != '\n')
+        at--;
+    return at;
+}
+
 /* Scans window w, which starts inside the current line, without keeping
  * whole lines. Returns 1 at the first selected line in SELECT_FIRST mode,
  * else 0. *carry is set to how many trailing bytes the next window must
@@ -973,18 +981,37 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
     size_t stop;
     size_t keep;
     size_t m;
+    size_t at;
     size_t undecided;
 
     pos = 0;
     for (;;) {
-        nl = (const char *)memchr(w.ptr + pos, '\n', w.len - pos);
-        stop = nl == NULL ? w.len : (size_t)(nl - w.ptr);
         /* -w needs each candidate's previous byte: a carried first byte
          * is only context. */
         from = pos == 0 && ls->mid && s->word ? 1 : pos;
         m = NO_MATCH;
-        if (!ls->marked && from <= stop)
-            m = find_selected(s, cu_str_n(w.ptr, stop), from, finder, nl == NULL && !at_end, &undecided);
+        if (!s->invert && !ls->marked) {
+            /* Search the rest of the window at once and delimit only the
+             * line a match selects, as select_text does: lines without a
+             * match need no per-line work. */
+            if (from <= w.len)
+                m = find_selected(s, w, from, finder, !at_end, &undecided);
+            at = line_start(w, pos, m == NO_MATCH ? w.len : m == UNDECIDED ? undecided : m);
+            if (at != pos) {
+                ls->open = 0;
+                ls->mid = 0;
+                pos = at;
+            }
+            nl = m == NO_MATCH || m == UNDECIDED ? NULL :
+                 (const char *)memchr(w.ptr + m, '\n', w.len - m);
+            stop = nl == NULL ? w.len : (size_t)(nl - w.ptr);
+        } else {
+            nl = (const char *)memchr(w.ptr + pos, '\n', w.len - pos);
+            stop = nl == NULL ? w.len : (size_t)(nl - w.ptr);
+            if (!ls->marked && from <= stop)
+                m = find_selected(s, cu_str_n(w.ptr, stop), from, finder, nl == NULL && !at_end,
+                                  &undecided);
+        }
         if (m == UNDECIDED) {
             /* Rescan once the next byte is read: from the byte before the
              * candidate as context, or from its line's start. Carrying the
