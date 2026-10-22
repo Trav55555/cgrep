@@ -5,85 +5,85 @@
   },
   "tools": {
     "cgrep": {
-      "version": "cgrep 0.1.0 (cd5858e, c-utils b74b8a9)"
+      "version": "cgrep 0.1.0 (805650d, c-utils b74b8a9)"
     },
     "rg": {
       "version": "ripgrep 15.2.0 (rev e89fff89ac)"
     }
   },
-  "cpu": "AMD EPYC 7763 64-Core Processor",
+  "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
   "medians": {
     "wide-files-cgrep-single": {
-      "elapsed_ns": 127639187
+      "elapsed_ns": 76658570
     },
     "wide-files-rg-single": {
-      "elapsed_ns": 158961811
+      "elapsed_ns": 107719338
     },
     "wide-files-cgrep-default": {
-      "elapsed_ns": 60528567
+      "elapsed_ns": 45315536
     },
     "wide-files-rg-default": {
-      "elapsed_ns": 70196768
+      "elapsed_ns": 56024216
     },
     "wide-lines-cgrep-single": {
-      "elapsed_ns": 127607290
+      "elapsed_ns": 76414125
     },
     "wide-lines-rg-single": {
-      "elapsed_ns": 161831818
+      "elapsed_ns": 108602947
     },
     "wide-lines-cgrep-default": {
-      "elapsed_ns": 60529541
+      "elapsed_ns": 45374468
     },
     "wide-lines-rg-default": {
-      "elapsed_ns": 70265804
+      "elapsed_ns": 56170726
     },
     "manydirs-files-cgrep-single": {
-      "elapsed_ns": 71765450
+      "elapsed_ns": 43608465
     },
     "manydirs-files-rg-single": {
-      "elapsed_ns": 97790306
+      "elapsed_ns": 65534844
     },
     "manydirs-files-cgrep-default": {
-      "elapsed_ns": 45068150
+      "elapsed_ns": 31199608
     },
     "manydirs-files-rg-default": {
-      "elapsed_ns": 42438779
+      "elapsed_ns": 32822338
     },
     "manydirs-lines-cgrep-single": {
-      "elapsed_ns": 72094879
+      "elapsed_ns": 43717532
     },
     "manydirs-lines-rg-single": {
-      "elapsed_ns": 98568238
+      "elapsed_ns": 66226945
     },
     "manydirs-lines-cgrep-default": {
-      "elapsed_ns": 43491173
+      "elapsed_ns": 31112483
     },
     "manydirs-lines-rg-default": {
-      "elapsed_ns": 42036852
+      "elapsed_ns": 32820081
     },
     "mixed-files-cgrep-single": {
-      "elapsed_ns": 62315212
+      "elapsed_ns": 57849324
     },
     "mixed-files-rg-single": {
-      "elapsed_ns": 70901671
+      "elapsed_ns": 71210435
     },
     "mixed-files-cgrep-default": {
-      "elapsed_ns": 26971834
+      "elapsed_ns": 27053500
     },
     "mixed-files-rg-default": {
-      "elapsed_ns": 29064930
+      "elapsed_ns": 31894611
     },
     "mixed-lines-cgrep-single": {
-      "elapsed_ns": 63746631
+      "elapsed_ns": 60234597
     },
     "mixed-lines-rg-single": {
-      "elapsed_ns": 72237279
+      "elapsed_ns": 74459822
     },
     "mixed-lines-cgrep-default": {
-      "elapsed_ns": 27035219
+      "elapsed_ns": 28357387
     },
     "mixed-lines-rg-default": {
-      "elapsed_ns": 29202233
+      "elapsed_ns": 32920262
     }
   },
   "fixture": {
