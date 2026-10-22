@@ -1,1 +1,2 @@
 {"commit": "5cbc6398d924c0f8ff436839b20a45b6109f8a2d", "run_id": "39808276795", "cgrep_vs_rg": "1.02x faster (geomean)"}
+{"commit": "64eee5988b6cb0c3d59f7c62db48e808cdb74dd1", "run_id": "39810309798", "cgrep_vs_rg": "1.21x faster (geomean)"}
