@@ -167,11 +167,15 @@ static void remove_tree(void)
         "g/sub/.rgignore", "g/.git/info/exclude", "xdg/git/ignore", "xdg/.config/git/ignore", "g/lib/keep.txt", "g/lib/other.txt",
         "e/.ignore", "e/#hash", "e/!bang", "e/space ", "e/trim", "e/trim ", "e/star*", "e/foo",
         "e/keep", "e/x", "e/sub/x", "e/sub/deep/x", "e/sub/foo", "e/sub/]", "e/sub/[", "e/sub/end\n", "e/sub/f\\o",
-        "e/blocked/keep", "e/tail/keep"};
+        "e/blocked/keep", "e/tail/keep",
+        "w/common/info/exclude", "w/common/worktrees/wt/commondir", "w/common/worktrees/wt/info/exclude",
+        "w/tree/.git", "w/tree/shared", "w/tree/own", "w/tree/kept"};
     static const char *const dirs[] = {"r/a/deep", "r/a", "r/b", "r/.hid", "r/empty", "r/locked", "r",
         "g/sub/deep", "g/sub", "g/out", "g/lib", "g/.git/info", "g/.git", "g", "xdg/git",
         "xdg/.config/git", "xdg/.config", "xdg",
-        "e/sub/deep", "e/sub", "e/blocked", "e/tail", "e"};
+        "e/sub/deep", "e/sub", "e/blocked", "e/tail", "e",
+        "w/common/worktrees/wt/info", "w/common/worktrees/wt", "w/common/worktrees", "w/common/info",
+        "w/common", "w/tree", "w"};
     char p[600];
     size_t i;
 
@@ -359,6 +363,45 @@ static void ignore_edges(void)
     }
     assert(chmod(p, 0600) == 0);
 #endif
+}
+
+/* A .git file names the git directory, relative to its own directory; a
+ * commondir there names the one linked worktrees share. info/exclude is read
+ * from the shared one, else from the git directory, as git does. */
+static void worktrees(void)
+{
+    static const char *const args[] = {"-l", "alpha", "@w/tree"};
+    static const char *const workers[] = {"-j8", "-l", "alpha", "@w/tree"};
+    static const char *const names[] = {"w/tree/shared", "w/tree/own", "w/tree/kept"};
+    static const char relative[] = "gitdir: ../common/worktrees/wt\n";
+    char p[600];
+    size_t i;
+
+    make_dir("w");
+    make_dir("w/tree");
+    make_dir("w/common");
+    make_dir("w/common/info");
+    make_dir("w/common/worktrees");
+    make_dir("w/common/worktrees/wt");
+    make_dir("w/common/worktrees/wt/info");
+    for (i = 0; i < sizeof names / sizeof names[0]; i++)
+        make_file(names[i], "alpha\n", 6);
+    make_file("w/common/info/exclude", "shared\n", 7);
+    make_file("w/common/worktrees/wt/info/exclude", "own\n", 4);
+    make_file("w/common/worktrees/wt/commondir", "../..\r\n", 7);
+    make_file("w/tree/.git", relative, sizeof relative - 1);
+    assert(run(3, args) == 0 && err_text[0] == '\0');
+    assert(strcmp(out_text, "w/tree/kept\nw/tree/own\n") == 0);
+    assert(run(4, workers) == 0 && strcmp(out_text, "w/tree/kept\nw/tree/own\n") == 0);
+    /* Without commondir, as for a submodule: the git directory's own. */
+    sprintf(p, "%s/w/common/worktrees/wt/commondir", root);
+    assert(remove(p) == 0);
+    sprintf(p, "gitdir: %s/w/common/worktrees/wt", root);
+    make_file("w/tree/.git", p, strlen(p));
+    assert(run(3, args) == 0 && strcmp(out_text, "w/tree/kept\nw/tree/shared\n") == 0);
+    /* Not a gitdir line: no exclude file. */
+    make_file("w/tree/.git", "gitdir:x\n", 9);
+    assert(run(3, args) == 0 && strcmp(out_text, "w/tree/kept\nw/tree/own\nw/tree/shared\n") == 0);
 }
 
 /* Reference paths for bracket boundaries and wildcard backtracking.
@@ -600,6 +643,7 @@ int main(void)
 #endif
     ignore_files();
     ignore_edges();
+    worktrees();
     ignore_globs();
     ignore_work();
     depth_guard();
