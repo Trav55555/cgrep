@@ -218,9 +218,38 @@ Median of 41 interleaved runs, `-l` with no match, default threads, ms:
 | `/usr/include` | 5.4 | 5.5 | 7.8 |
 | `src/` (no subdirectories) | 0.70 | 0.69 | 3.15 |
 
-The remaining gap is in the pool rather than the walk: with listing ahead
-the large tree is fastest at `-j6` (50 ms) and slows again with more
-workers, as it did before (63 ms at `-j3`, 79 ms at `-j24`).
+## Waking only the workers needed
+
+With listing ahead, more workers made the large tree slower again
+(46 ms at `-j6`, 53 ms at `-j12`, 71 ms at `-j32`). Idle workers waited
+on the pool condition, which every publication of 64 inputs and every
+claim broadcast, so all of them woke, took the mutex and mostly went back
+to sleep.
+
+Now an idle worker waits on its own condition and records that it is idle.
+A publication wakes idle workers only until their next batch sizes cover
+the new inputs; a claim that leaves inputs wakes more the same way; the end
+of the listing and cancellation wake all of them. The pool condition is
+the coordinator's alone. No new condition is created.
+
+Median of 21 interleaved runs on the 9,331-directory tree, `-l` with no
+match, wall / CPU ms:
+
+| Jobs | before | after |
+| --- | ---: | ---: |
+| 4 | 52.1 / 320 | 53.0 / 320 |
+| 6 | 46.3 / 350 | 45.2 / 350 |
+| 12 (default here) | 52.9 / 360 | 47.9 / 350 |
+| 24 | 67.2 / 430 | 48.1 / 350 |
+| 32 | 71.2 / 460 | 52.8 / 350 |
+
+ripgrep 15.2.0 takes 46.2 / 370. The flat 20,000-file directory, the mixed
+and many-directory CI trees and `/usr/include` are unchanged with `-l` and
+`-n`. From `-j6` up the walker is the critical path: timed inside the
+walker thread, listing takes about 45 ms of a 50 ms run, of which about
+21 ms is waiting for listings still in flight or listing directories no
+prefetch thread had reached, because the depth-first walk usually wants
+the directory it queued last.
 
 ## Verification gates
 

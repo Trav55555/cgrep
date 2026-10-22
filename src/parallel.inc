@@ -83,6 +83,7 @@ typedef struct {
     int drain; /* next slot the coordinator consumes */
     unsigned polls;
     int batch;     /* inputs to claim next */
+    int idle;      /* waiting on changed for inputs; written under the mutex */
     int cancelled; /* observed cancellation: the batch is abandoned */
     const char *path;
     int walked;
@@ -96,7 +97,9 @@ typedef struct {
 
 struct ParallelPool {
     CuMutex *mutex;
-    CuCond *changed; /* inputs published, a batch claimed, listing finished */
+    /* The coordinator's: inputs published, a batch claimed, listing
+     * finished. Idle workers wait on their own condition instead. */
+    CuCond *changed;
     int cancel;
     int jobs;    /* workers allowed */
     int started; /* workers running; written by the coordinator */
@@ -155,6 +158,25 @@ static void worker_signal(ParallelWorker *worker)
     cu_cond_broadcast(worker->changed);
 }
 
+/* Wakes idle workers until their next claims cover available inputs, or
+ * every idle worker when all is set (the listing ended). Waking each one
+ * for every publication cost more than the search on small files. Holds
+ * the mutex. */
+static void wake_idle(ParallelPool *pool, int available, int all)
+{
+    ParallelWorker *worker;
+    int i;
+
+    for (i = 0; i < pool->started && (all || available > 0); i++) {
+        worker = pool->workers[i];
+        if (worker->idle) {
+            worker->idle = 0;
+            available -= worker->batch;
+            worker_signal(worker);
+        }
+    }
+}
+
 /* Copies what the walker wrote since the last call. Holds the mutex. */
 static void publish_diagnostics(ParallelPool *pool)
 {
@@ -210,6 +232,7 @@ static int inputs_publish(Inputs *inputs)
         inputs->stop = 1;
     publish_diagnostics(pool);
     pool_signal(pool);
+    wake_idle(pool, pool->count - pool->next, 0);
     pool_unlock(pool);
     return ok;
 }
@@ -414,6 +437,7 @@ static void walker_main(void *context)
     pool->listing_failed = !ok;
     pool->listed = 1;
     pool_signal(pool);
+    wake_idle(pool, 0, 1);
     pool_unlock(pool);
 }
 
@@ -654,13 +678,18 @@ static void worker_main(void *context)
         /* A free fill slot first, so a claimed batch can always start. */
         while (worker->slots[worker->fill].state != SLOT_FREE && !pool->cancel)
             worker_wait(worker);
-        while (pool->next == pool->count && !pool->listed && !pool->cancel)
-            pool_wait(pool);
+        while (pool->next == pool->count && !pool->listed && !pool->cancel) {
+            worker->idle = 1;
+            worker_wait(worker);
+        }
+        worker->idle = 0;
         if (pool->cancel || pool->next == pool->count)
             break;
         n = claim_size(pool, worker->batch);
         start = pool->next;
         pool_claim(pool, worker->index, start, n);
+        /* Inputs this claim left are other idle workers' to take. */
+        wake_idle(pool, pool->count - pool->next, 0);
         paths = CU_VEC_DATA(&pool->listing->inputs.paths, char *);
         walked = CU_VEC_DATA(&pool->listing->inputs.walked, unsigned char);
         for (f = 0; f < n; f++) {
@@ -742,6 +771,7 @@ static int start_worker(ParallelPool *pool, CuArena *thread_arena, FILE *err, in
         worker->drain = 0;
         worker->polls = 0;
         worker->batch = CGREP_BATCH_START;
+        worker->idle = 0;
         worker->cancelled = 0;
         worker->path = NULL;
         worker->walked = 0;
