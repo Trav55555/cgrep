@@ -197,6 +197,7 @@ static int glob_path(const char *g, size_t gl, const char *p, size_t pl, unsigne
     size_t at;
 
     if (depth > IGNORE_DEPTH_LIMIT) {
+        w->left = 0;
         w->failed = 1;
         return 0;
     }
