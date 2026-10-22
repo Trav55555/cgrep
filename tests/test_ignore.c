@@ -343,17 +343,36 @@ static void roots(void)
     }
 }
 
-static void ancestor_limit(void)
+/* "r/" then n bytes of 'x' with a '/' every 200th, in a malloc'd string. */
+static char *long_path(size_t n)
+{
+    char *path;
+    size_t i;
+
+    path = (char *)malloc(n + 3);
+    assert(path != NULL);
+    memcpy(path, "r/", 2);
+    for (i = 0; i < n; i++)
+        path[i + 2] = i % 200 == 199 ? '/' : 'x';
+    path[n + 2] = '\0';
+    return path;
+}
+
+/* An ancestor's rules see the path below it however long it is: an
+ * unanchored rule as well as an anchored one that needs the whole path,
+ * which is joined in the arena for the verdict. Without memory for it
+ * there is no verdict, and the error says so. */
+static void long_paths(void)
 {
     CuArena a;
     IgnoreStack st;
+    IgnoreDir *above;
     IgnoreDir d;
     const char *error;
-    char path[4100];
+    char *path;
     size_t n;
-    size_t i;
 
-    cu_arena_init(&a);
+    cu_arena_init_with(&a, 4096, 0);
     init_stack(&st, &a, "r");
     init_dir(&d, "parent", 0);
     d.above = 1;
@@ -363,12 +382,22 @@ static void ancestor_limit(void)
     init_dir(&d, "r", 0);
     CU_VEC_PUSH(&st.dirs, &d);
     for (n = 4093; n <= 4095; n++) {
-        memcpy(path, "r/", 2);
-        for (i = 0; i < n; i++)
-            path[i + 2] = i % 200 == 199 ? '/' : 'x';
-        path[n + 2] = '\0';
-        assert(ignore_verdict(&st, path, 0, &error) == (n == 4093 ? 1 : 0) && error == NULL);
+        path = long_path(n);
+        assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+        free(path);
     }
+    path = long_path(12099);
+    assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+    above = CU_VEC_AT(&st.dirs, IgnoreDir, 0);
+    assert(parse_ignore(&a, cu_str_cstr("p/**\n"), &above->files[IG_IGNORE]));
+    assert(ignore_verdict(&st, path, 0, &error) == 1 && error == NULL);
+    assert(parse_ignore(&a, cu_str_cstr("q/**\n"), &above->files[IG_IGNORE]));
+    assert(ignore_verdict(&st, path, 0, &error) == 0 && error == NULL);
+    cu_arena_fail_at(&a, a.attempts);
+    error = NULL;
+    assert(ignore_verdict(&st, path, 0, &error) == 0);
+    assert(error != NULL && strcmp(error, "out of memory") == 0);
+    free(path);
     cu_arena_release(&a);
 }
 
@@ -381,7 +410,7 @@ int main(void)
     empty_frames();
     failures();
     roots();
-    ancestor_limit();
+    long_paths();
     printf("test_ignore: PASS\n");
     return 0;
 }

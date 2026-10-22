@@ -425,16 +425,19 @@ static int ignore_dir_empty(const IgnoreDir *d)
 
 /* The verdict for path (as walked, ending in its name) under the stack:
  * 1 ignored, -1 un-ignored, 0 neither. When the rules exceed the work
- * limit there is none: 0, with *error set to say why; else *error is NULL. */
+ * limit, or memory for an ancestor's relative path runs out, there is
+ * none: 0, with *error set to say why; else *error is NULL. */
 static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, const char **error)
 {
     const IgnoreDir *dirs;
     const IgnoreDir *d;
     IgnoreWork work;
-    char relative_path[4096];
+    CuTemp scratch;
+    char *joined;
     const char *rel;
     const char *below;
     size_t below_len;
+    size_t total;
     size_t len;
     size_t n;
     size_t i;
@@ -458,6 +461,8 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
     len = strlen(st->root);
     below = path + len + (len != 0 && st->root[len - 1] != '/');
     below_len = strlen(below);
+    /* An ancestor's relative path is joined for this verdict only. */
+    scratch = cu_temp_begin(st->arena);
     for (i = n; i-- != 0;) {
         d = &dirs[i];
         /* Most directories have no rules; only their .git entry counts. */
@@ -467,13 +472,15 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
         }
         if (d->above) {
             len = strlen(d->root_below);
-            if (len + 1 + below_len >= sizeof relative_path)
-                continue;
-            memcpy(relative_path, d->root_below, len);
-            relative_path[len] = '/';
-            memcpy(relative_path + len + 1, below, below_len);
-            rel = relative_path;
-            len += 1 + below_len;
+            if (!cu_size_add(len + 1, below_len, &total) || (joined = cu_arena_push_bytes(st->arena, total)) == NULL) {
+                *error = "out of memory";
+                break;
+            }
+            memcpy(joined, d->root_below, len);
+            joined[len] = '/';
+            memcpy(joined + len + 1, below, below_len);
+            rel = joined;
+            len = total;
         } else {
             len = strlen(d->path);
             rel = path + len + (len != 0 && d->path[len - 1] != '/');
@@ -488,10 +495,13 @@ static int ignore_verdict(const IgnoreStack *st, const char *path, int is_dir, c
         }
         if (work.failed) {
             *error = ignore_overrun;
-            return 0;
+            break;
         }
         saw_git |= d->has_git;
     }
+    cu_temp_end(scratch);
+    if (*error != NULL)
+        return 0;
     for (k = 0; k < IG_KINDS; k++) {
         if (m[k] != 0)
             return m[k];
