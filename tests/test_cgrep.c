@@ -541,6 +541,49 @@ static void test_new_options(void)
     assert(run(NULL, 2, valid) == 1 && err_text[0] == '\0');
 }
 
+/* The reference's long names behave as their short forms. */
+static void test_long_names(void)
+{
+    static const char *const pairs[][2] = {
+        {"--line-number", "-n"}, {"--ignore-case", "-i"}, {"--word-regexp", "-w"},
+        {"--invert-match", "-v"}, {"--count", "-c"}, {"--files-with-matches", "-l"}
+    };
+    static const char text[] = "alpha\nALPHA x\nalphabet\nbeta\n";
+    static const char input[] = "names";
+    static const char *const threads_long[] = {"--threads", "2", "-c", "alpha"};
+    static const char *const threads_joined[] = {"--threads=2", "-c", "alpha"};
+    static const char *const threads_short[] = {"-j2", "-c", "alpha"};
+    static const char *const threads_zero[] = {"--threads=0", "alpha"};
+    static const char *const depth_short[] = {"-d", "0", "alpha"};
+    static const char *const depth_joined[] = {"-nd0", "alpha"};
+    static const char *const depth_bad[] = {"-d1x", "alpha"};
+    static const char *const depth_missing[] = {"-d"};
+    const char *args[2];
+    char expected[sizeof out_text];
+    int status;
+    size_t k;
+
+    write_file(input, text, sizeof text - 1);
+    for (k = 0; k < sizeof pairs / sizeof pairs[0]; k++) {
+        args[0] = pairs[k][1];
+        args[1] = "alpha";
+        status = run(input, 2, args);
+        strcpy(expected, out_text);
+        args[0] = pairs[k][0];
+        assert(run(input, 2, args) == status && strcmp(out_text, expected) == 0);
+        assert(err_text[0] == '\0');
+    }
+    assert(run(input, 3, threads_short) == 0);
+    strcpy(expected, out_text);
+    assert(run(input, 4, threads_long) == 0 && strcmp(out_text, expected) == 0);
+    assert(run(input, 3, threads_joined) == 0 && strcmp(out_text, expected) == 0);
+    assert(run(input, 2, threads_zero) == 2 && strstr(err_text, "worker count") != NULL);
+    assert(run(input, 3, depth_short) == 0 && strcmp(out_text, "alpha\nalphabet\n") == 0);
+    assert(run(input, 2, depth_joined) == 0 && strcmp(out_text, "1:alpha\n3:alphabet\n") == 0);
+    assert(run(input, 2, depth_bad) == 2 && strstr(err_text, "max depth") != NULL);
+    assert(run(input, 1, depth_missing) == 2);
+}
+
 int main(void)
 {
     const char *tmp;
@@ -558,6 +601,7 @@ int main(void)
     test_binary();
     test_lines();
     test_stdin();
+    test_long_names();
     test_usage();
     test_version();
     test_new_options();
