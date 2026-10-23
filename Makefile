@@ -52,6 +52,7 @@ iotest: $(BUILD)/cgrep
 difftest: $(BUILD)/cgrep
 	python3 -I tests/difftest.py $(BUILD)/cgrep
 	python3 -I tests/window_difftest.py $(BUILD)/cgrep
+	python3 -I tests/long_difftest.py $(BUILD)/cgrep
 
 verify:
 	CUTILS="$(abspath $(CUTILS))" DCHECK="$(DCHECK)" BUILD="$(BUILD)" bash tests/verify.sh
