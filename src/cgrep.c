@@ -55,26 +55,35 @@ static unsigned both_equal(Bytes16 a, Bytes16 b, Bytes16 c, Bytes16 d)
 #define CGREP_REVISION "unknown"
 #endif
 
-static const char usage[] = "usage: cgrep [-0cilnvw] [-j N] [--hidden] [--no-ignore] [--max-depth N] PATTERN [PATH...]\n"
+static const char usage[] = "usage: cgrep [-.0cilnvw] [-j N] [-d N] [--no-ignore] PATTERN [PATH...]\n"
                             "       cgrep --help | --version\n";
 
+/* Three literals: C90 guarantees only 509 characters per string. */
 static const char help[] =
-    "  -h, --help     Print this help.\n"
-    "  -V, --version  Print version and source revisions.\n"
-    "  -0, --null     Follow printed paths with NUL.\n"
-    "  -n             Print line numbers.\n"
-    "  -i             Ignore ASCII case.\n"
-    "  -w             Match whole words.\n"
-    "  -v             Select non-matching lines.\n"
-    "  -c             Print selected-line counts.\n"
-    "  -l             Print matching file paths.\n"
-    "  -j N           Use 1 through 32 workers (default: online CPUs, at most 32;\n"
-    "                 1 where no worker backend exists).\n";
+    "  -h, --help                Print this help.\n"
+    "  -V, --version             Print version and source revisions.\n"
+    "  -0, --null                Follow printed paths with NUL.\n"
+    "  -n, --line-number         Print line numbers.\n"
+    "  -i, --ignore-case         Ignore ASCII case.\n"
+    "  -w, --word-regexp         Match whole words.\n";
+static const char help_select[] =
+    "  -v, --invert-match        Select non-matching lines.\n"
+    "  -c, --count               Print selected-line counts.\n"
+    "  -l, --files-with-matches  Print matching file paths.\n"
+    "  -j N, --threads N         Use 1 through 32 workers (default: online CPUs,\n"
+    "                            at most 32; 1 where no worker backend exists).\n";
 static const char help_walk[] =
-    "  --hidden       Search hidden names, respecting ignore rules.\n"
-    "  --no-ignore    Disable ignore files.\n"
-    "  --max-depth N  Limit traversal depth (root is depth 0).\n"
-    "  --             End option parsing.\n";
+    "  -., --hidden              Search hidden names, respecting ignore rules.\n"
+    "  --no-ignore               Disable ignore files.\n"
+    "  -d N, --max-depth N       Limit traversal depth (root is depth 0).\n"
+    "  --                        End option parsing.\n";
+
+/* The reference's long names for flags handled in short form. */
+static const char *const long_flags[][2] = {
+    {"--line-number", "-n"}, {"--ignore-case", "-i"}, {"--word-regexp", "-w"},
+    {"--invert-match", "-v"}, {"--count", "-c"}, {"--files-with-matches", "-l"},
+    {"--threads", "-j"}, {"--hidden", "-."}
+};
 
 typedef struct {
     CuStr text;      /* borrowed from argv */
@@ -1846,7 +1855,9 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
     int sorted;
     int enter;
 
-    if (options->limited && (depth >= options->max_depth || depth >= 256))
+    /* A requested depth past the nesting limit is no cutoff: the limit
+     * reports deeper directories, never silently stops before them. */
+    if (options->limited && depth >= options->max_depth)
         return 1;
     if (inputs->pool != NULL && (inputs->stop || inputs_cancelled(inputs)))
         return 1;
@@ -1926,7 +1937,7 @@ static int walk(CuArena *a, const char *dir, Inputs *inputs, FILE *err, IgnoreSt
         /* Directories the walk below would return from at once are not
          * listed ahead. */
         enter = items[i].is_dir && items[i].error == NULL && !items[i].skip &&
-                !(options->limited && (depth + 1 >= options->max_depth || depth + 1 >= 256)) &&
+                !(options->limited && depth + 1 >= options->max_depth) &&
                 depth + 1 <= 256;
         if (children != NULL && children[i] != NULL) {
             /* Listed ahead by a prefetch thread, before any verdict. */
@@ -2179,6 +2190,9 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     int stdin_named;
     int directory_named;
     const char *flag;
+    const char *cluster;
+    const char *value;
+    size_t alias;
 
     search_init(&s, out);
     s.finder = &finder;
@@ -2196,13 +2210,9 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fputs(usage, out);
             fputs(help, out);
+            fputs(help_select, out);
             fputs(help_walk, out);
             return fflush(out) != 0 || ferror(out) ? 2 : 0;
-        }
-        if (strcmp(argv[i], "--hidden") == 0) {
-            listing.options.hidden = 1;
-            i++;
-            continue;
         }
         if (strcmp(argv[i], "--null") == 0) {
             s.null = 1;
@@ -2232,12 +2242,26 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
             fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
             return fflush(out) != 0 || ferror(out) ? 2 : 0;
         }
+        if (strncmp(argv[i], "--threads=", 10) == 0) {
+            jobs = worker_count(argv[i] + 10);
+            if (jobs == 0) {
+                fputs("cgrep: worker count must be 1 through 32\n", err);
+                return 2;
+            }
+            i++;
+            continue;
+        }
+        cluster = argv[i];
+        for (alias = 0; alias < sizeof long_flags / sizeof long_flags[0]; alias++)
+            if (strcmp(argv[i], long_flags[alias][0]) == 0)
+                cluster = long_flags[alias][1];
         /* Short flags cluster: -vn, -cj4. A value flag takes the rest of
          * its argument or, if that is empty, the next one. */
-        for (flag = argv[i] + 1; *flag != '\0'; flag++) {
+        for (flag = cluster + 1; *flag != '\0'; flag++) {
             if (*flag == 'h') {
                 fputs(usage, out);
                 fputs(help, out);
+                fputs(help_select, out);
                 fputs(help_walk, out);
                 return fflush(out) != 0 || ferror(out) ? 2 : 0;
             } else if (*flag == '0') {
@@ -2257,9 +2281,19 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
                 s.fold = 1;
             } else if (*flag == 'w') {
                 s.word = 1;
+            } else if (*flag == '.') {
+                listing.options.hidden = 1;
             } else if (*flag == 'V') {
                 fprintf(out, "cgrep %s (%s)\n", CGREP_VERSION, CGREP_REVISION);
                 return fflush(out) != 0 || ferror(out) ? 2 : 0;
+            } else if (*flag == 'd') {
+                value = flag[1] != '\0' ? flag + 1 : i + 1 < argc ? argv[++i] : "";
+                if (!parse_depth(value, &listing.options.max_depth)) {
+                    fputs("cgrep: max depth must be a non-negative integer in range\n", err);
+                    return 2;
+                }
+                listing.options.limited = 1;
+                break;
             } else if (*flag == 'j') {
                 if (flag[1] != '\0')
                     jobs = worker_count(flag + 1);

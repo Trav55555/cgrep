@@ -379,7 +379,7 @@ static void queue_children(Prefetch *pf, DirFetch *f)
     depth = f->depth + 1;
     count = cu_vec_len(&f->list.entries);
     if (count == 0 || !f->list.opened || depth > 256 ||
-        (pf->limited && (depth >= pf->max_depth || depth >= 256)))
+        (pf->limited && depth >= pf->max_depth))
         return;
     list = CU_VEC_DATA(&f->list.entries, CuDirEntry);
     f->children = CU_PUSH(&pf->arena, DirFetch *, count);

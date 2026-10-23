@@ -492,6 +492,7 @@ static void depth_guard(void)
 {
     static const char *const args[] = {"--no-ignore", "alpha", "@h"};
     static const char *const limited[] = {"--no-ignore", "--max-depth=999", "alpha", "@h"};
+    static const char *const at_limit[] = {"--no-ignore", "--max-depth=257", "alpha", "@h"};
     static const char *const zero[] = {"--max-depth", "0", "alpha", "@h/top"};
     char rel[600];
     char path[1200];
@@ -513,8 +514,15 @@ static void depth_guard(void)
     chain_path(rel, 256, "f");
     sprintf(expected, "%s:alpha\nh/top:alpha\n", rel);
     assert(strcmp(out_text, expected) == 0);
-    assert(run(4, limited) == 0 && err_text[0] == '\0');
-    assert(strcmp(out_text, "h/top:alpha\n") == 0);
+    /* A requested depth past the limit is no cutoff: the same report and
+     * matches as without one; 257 stops exactly where the limit would. */
+    chain_path(rel, 257, NULL);
+    sprintf(expected, "cgrep: %s/%s: directory nesting exceeds 256 levels\n", root, rel);
+    assert(run(4, limited) == 2 && strcmp(err_text, expected) == 0);
+    chain_path(rel, 256, "f");
+    sprintf(expected, "%s:alpha\nh/top:alpha\n", rel);
+    assert(strcmp(out_text, expected) == 0);
+    assert(run(4, at_limit) == 0 && err_text[0] == '\0' && strcmp(out_text, expected) == 0);
     assert(run(4, zero) == 0 && strcmp(out_text, "alpha\n") == 0);
     chain_path(rel, 256, "f");
     sprintf(path, "%s/%s", root, rel);
