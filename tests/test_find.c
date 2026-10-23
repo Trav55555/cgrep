@@ -520,15 +520,21 @@ static void test_uniform_windows(void)
 }
 
 /* -w matches against a naive bounded search on every small input over a
- * word/non-word/LF alphabet, and dense rejected candidates stay linear. */
+ * word/non-word/LF alphabet, and dense rejected candidates stay linear.
+ * The alphabet is ASCII; tests/word_difftest.py covers other characters. */
+static int ascii_word(char c)
+{
+    return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
 static size_t naive_word(CuStr hay, size_t pos, CuStr needle)
 {
     size_t m;
 
     for (m = pos; m + needle.len <= hay.len; m++) {
         if (memcmp(hay.ptr + m, needle.ptr, needle.len) == 0 &&
-            (m == 0 || !word_byte(hay.ptr[m - 1])) &&
-            (m + needle.len == hay.len || !word_byte(hay.ptr[m + needle.len])) &&
+            (m == 0 || !ascii_word(hay.ptr[m - 1])) &&
+            (m + needle.len == hay.len || !ascii_word(hay.ptr[m + needle.len])) &&
             !(needle.len == 0 && m == hay.len && m > pos && hay.ptr[m - 1] == '\n'))
             return m;
     }

@@ -15,7 +15,7 @@ TESTS := $(patsubst tests/%.c,$(BUILD)/%,$(wildcard tests/test_*.c)) \
 .PHONY: all check test difftest iotest mutate verify FORCE
 all: $(BUILD)/cgrep
 
-$(BUILD)/cgrep: cmd/main.c $(SRCS) src/parallel.inc src/ignore.inc include/cgrep.h $(CUTILS)/include/cu.h $(BUILD)/revision | $(BUILD)
+$(BUILD)/cgrep: cmd/main.c $(SRCS) src/parallel.inc src/ignore.inc src/word.inc include/cgrep.h $(CUTILS)/include/cu.h $(BUILD)/revision | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -DCGREP_REVISION="\"$$(cat $(BUILD)/revision)\"" -o $@ cmd/main.c $(SRCS)
 
 # Revisions for --version. A tree without its own .git reports unknown
@@ -31,14 +31,14 @@ FORCE:
 test: $(TESTS)
 	@for t in $(TESTS); do echo "$$t"; "$$t" || exit 1; done
 
-$(BUILD)/test_%: tests/test_%.c cmd/main.c $(SRCS) src/parallel.inc src/ignore.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
+$(BUILD)/test_%: tests/test_%.c cmd/main.c $(SRCS) src/parallel.inc src/ignore.inc src/word.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ $< $(SRCS)
 
 # The vector variants include the portable suites.
 $(BUILD)/test_find_simd: tests/test_find.c
 $(BUILD)/test_count_simd: tests/test_count.c
 
-$(BUILD)/sem_%: semantics/sem_%.c $(wildcard tests/test_*.c) $(SRCS) src/parallel.inc src/ignore.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
+$(BUILD)/sem_%: semantics/sem_%.c $(wildcard tests/test_*.c) $(SRCS) src/parallel.inc src/ignore.inc src/word.inc include/cgrep.h $(CUTILS)/include/cu.h | $(BUILD)
 	$(CC) $(STRICT) $(CFLAGS) $(INCS) -o $@ $< $(SRCS)
 
 check:
@@ -53,6 +53,7 @@ difftest: $(BUILD)/cgrep
 	python3 -I tests/difftest.py $(BUILD)/cgrep
 	python3 -I tests/window_difftest.py $(BUILD)/cgrep
 	python3 -I tests/long_difftest.py $(BUILD)/cgrep
+	python3 -I tests/word_difftest.py $(BUILD)/cgrep
 
 verify:
 	CUTILS="$(abspath $(CUTILS))" DCHECK="$(DCHECK)" BUILD="$(BUILD)" bash tests/verify.sh
