@@ -63,6 +63,7 @@ jobs:
           python3 -I tests/difftest.py build/cgrep
           python3 -I tests/ignore_difftest.py build/cgrep --cases 400
           python3 -I tests/window_difftest.py build/cgrep --cases 400
+          python3 -I tests/long_difftest.py build/cgrep --cases 30
 
       - name: Benchmark and render results
         run: |

@@ -78,8 +78,17 @@ def main():
             raise RuntimeError(f'large pipe exceeded its memory budget: {result!r}')
         print('PASS streaming pipe: 64 MiB input under a 32 MiB address-space limit')
 
-        with (root / 'long').open('wb') as stream:
+        # A line too long to print is read through and skipped unless it
+        # is selected; a selected one (its match after the limit) fails.
+        with (root / 'longplain').open('wb') as stream:
             stream.write(b'x' * (8 * 1024 * 1024 + 1))
+        result = subprocess.run([binary, 'alpha', 'longplain', 'match'], cwd=root,
+                                capture_output=True, timeout=10, preexec_fn=memory_limit(32))
+        if (result.returncode, result.stdout, result.stderr) != (0, b'match:alpha\n', b''):
+            raise RuntimeError(f'unselected long line was not skipped: {result!r}')
+        print('PASS long line: unselected line skipped within 32 MiB')
+        with (root / 'long').open('wb') as stream:
+            stream.write(b'x' * (8 * 1024 * 1024 + 1) + b'alpha')
         result = subprocess.run([binary, 'alpha', 'long', 'match'], cwd=root,
                                 capture_output=True, timeout=10, preexec_fn=memory_limit(32))
         if result.returncode != 2 or result.stdout != b'match:alpha\n' or b'line exceeds 8 MiB' not in result.stderr:

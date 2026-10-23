@@ -1165,6 +1165,99 @@ static void scan_stream(const Search *s, CuInput *in, CuVec *buffer, size_t held
         result->matched = 1;
 }
 
+/* The current line outgrew the printing window: buffer holds its first
+ * bytes, with no LF, and extra the next byte, already read and counted.
+ * Reads to the line's end only to decide whether it is selected, in
+ * scan_window's windows, and leaves the bytes after its LF in buffer
+ * untouched. Returns 0 when it is not selected, 1 when it is (it cannot be
+ * printed), 2 when a refill holds a NUL (*nul_offset is its offset), or -1
+ * with result->error set. */
+static int long_line(const Search *s, CuInput *in, CuVec *buffer, char extra, unsigned long *total,
+                     unsigned long *nul_offset, ScanResult *result)
+{
+    LineScan ls;
+    Finder local;
+    Finder *finder;
+    CuInputStatus status;
+    const char *nl;
+    const char *nul;
+    size_t held;
+    size_t raw; /* bytes from here are as read: -i folds only scanned ones */
+    size_t end;
+    size_t carry;
+    size_t want;
+    size_t got;
+    int at_end;
+    int pending; /* extra is not yet in buffer */
+
+    ls.marked = 0;
+    ls.open = 0;
+    ls.mid = 0;
+    ls.selected = 0;
+    finder = s->finder;
+    if (finder == NULL) {
+        finder_init(&local, &s->literal);
+        finder = &local;
+    }
+    held = buffer->len;
+    raw = 0;
+    at_end = 0;
+    pending = 1;
+    for (;;) {
+        nl = (const char *)memchr(buffer->data, '\n', held);
+        end = nl == NULL ? held : (size_t)(nl - buffer->data) + 1;
+        if (s->fold && raw < end) {
+            fold_ascii(buffer->data + raw, buffer->data + raw, end - raw);
+            raw = end;
+        }
+        (void)scan_window(s, cu_str_n(buffer->data, end), at_end, SELECT_COUNT, finder, &ls, &carry);
+        /* A match selects the line unless inverted; the rest is not read. */
+        if (ls.selected != 0 || (ls.marked && !s->invert))
+            return 1;
+        if (nl != NULL || at_end) {
+            memmove(buffer->data, buffer->data + end, held - end);
+            buffer->len = held - end;
+            return 0;
+        }
+        memmove(buffer->data, buffer->data + held - carry, carry);
+        raw = carry;
+        held = carry;
+        if (s->cancelled != NULL && s->cancelled(s->context)) {
+            result->error = SCAN_CANCELLED;
+            return -1;
+        }
+        if (pending) {
+            /* The byte that showed the line was too long comes first. */
+            buffer->data[held++] = extra;
+            pending = 0;
+        } else {
+            want = buffer->cap - held;
+            if (want > STREAM_CHUNK)
+                want = STREAM_CHUNK;
+            status = cu_input_read(in, buffer->data + held, want, &got);
+            if (status == CU_INPUT_ERROR) {
+                result->error = SCAN_IO;
+                result->system_error = cu_input_errno(in);
+                return -1;
+            }
+            if (status == CU_INPUT_END) {
+                at_end = 1;
+                continue;
+            }
+            nul = (const char *)memchr(buffer->data + held, '\0', got);
+            if (nul != NULL)
+                *nul_offset = *total + (unsigned long)(nul - (buffer->data + held));
+            if (!add_bytes(total, got)) {
+                result->error = SCAN_RANGE;
+                return -1;
+            }
+            if (nul != NULL)
+                return 2;
+            held += got;
+        }
+    }
+}
+
 /* The printing selection of one window, searching a folded copy for -i.
  * -2 means the copy could not be allocated. */
 static int print_window(const Search *s, const char *name, CuStr text, unsigned long *lines)
@@ -1201,6 +1294,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     unsigned long nul_offset;
     int probing;
     int found;
+    int skipped;
 
     result.matched = 0;
     result.error = SCAN_OK;
@@ -1313,8 +1407,21 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         }
         if (probing) {
             if (extra != '\n') {
-                result.error = SCAN_LINE_LIMIT;
-                break;
+                /* A line too long to print is skipped unless selected. A
+                 * NUL in it stops a walked file as any NUL does. */
+                buffer->len = old_len;
+                skipped = long_line(s, in, buffer, extra, &total, &nul_offset, &result);
+                if (skipped == 2 && s->walked) {
+                    if (result.matched && binary_warning(s, name, nul_offset) < 0)
+                        result.error = SCAN_OUTPUT;
+                } else if (skipped == 1 || skipped == 2) {
+                    result.error = SCAN_LINE_LIMIT;
+                }
+                if (skipped != 0)
+                    break;
+                if (s->numbers)
+                    lines++;
+                continue;
             }
             found = print_window(s, name, cu_str_n(buffer->data, old_len), &lines);
             if (found < 0) {

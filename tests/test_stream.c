@@ -284,7 +284,11 @@ static void test_line_limit(void)
     static const char *const counted[] = {"-c", "alpha"};
     static const char *const listed[] = {"-l", "alpha"};
     static const char *const uncounted[] = {"-cv", "alpha"};
+    static const char *const folded_args[] = {"-ni", "alpha"};
+    static const char *const word_args[] = {"-nw", "alpha"};
+    static const char *const inverted_args[] = {"-nv", "alpha"};
     char *bytes;
+    int at;
 
     bytes = (char *)malloc(STREAM_LINE_LIMIT + 8);
     assert(bytes != NULL);
@@ -295,14 +299,68 @@ static void test_line_limit(void)
     reset_faults();
     assert(run(2, args, bytes, STREAM_LINE_LIMIT) == 1);
     assert(error_text[0] == '\0');
+    /* A line too long to print is read through and skipped when it is
+     * not selected; only a selected one is an error. */
     reset_faults();
-    assert(run(2, args, bytes, STREAM_LINE_LIMIT + 1) == 2);
-    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    assert(run(2, args, bytes, STREAM_LINE_LIMIT + 1) == 1);
+    assert(output_text[0] == '\0' && error_text[0] == '\0');
     bytes[STREAM_LINE_LIMIT] = '\n';
     memcpy(bytes + STREAM_LINE_LIMIT + 1, "alpha\n", 6);
     reset_faults();
     assert(run(2, args, bytes, STREAM_LINE_LIMIT + 7) == 0);
     assert(strcmp(output_text, "2:alpha\n") == 0);
+    /* Twice the limit and more before the next line, which -i still prints
+     * as read; a -w candidate inside the long line is not a word. */
+    free(bytes);
+    bytes = (char *)malloc(2 * STREAM_LINE_LIMIT + 16);
+    assert(bytes != NULL);
+    memset(bytes, 'x', 2 * STREAM_LINE_LIMIT);
+    memcpy(bytes + 2 * STREAM_LINE_LIMIT, "\nALPHA\n", 7);
+    reset_faults();
+    assert(run(2, folded_args, bytes, 2 * STREAM_LINE_LIMIT + 7) == 0);
+    assert(strcmp(output_text, "2:ALPHA\n") == 0 && error_text[0] == '\0');
+    memcpy(bytes + STREAM_LINE_LIMIT + 3, "alpha", 5);
+    reset_faults();
+    assert(run(2, word_args, bytes, 2 * STREAM_LINE_LIMIT + 7) == 1);
+    assert(output_text[0] == '\0' && error_text[0] == '\0');
+    /* A match before or after the limit selects the line: an error. */
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT + 7) == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL && output_text[0] == '\0');
+    memcpy(bytes + STREAM_LINE_LIMIT + 3, "xxxxx", 5);
+    memcpy(bytes + 16, "alpha", 5);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT + 7) == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    /* -v selects a long line without a match; an unterminated one too. */
+    memcpy(bytes + 16, "xxxxx", 5);
+    reset_faults();
+    assert(run(2, inverted_args, bytes, 2 * STREAM_LINE_LIMIT) == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT) == 1);
+    assert(output_text[0] == '\0' && error_text[0] == '\0');
+    memcpy(bytes + 2 * STREAM_LINE_LIMIT - 5, "alpha", 5);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT) == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    /* A NUL in the rest of a long named input keeps the line-limit
+     * error; so does a read failure there, with its cause. */
+    bytes[STREAM_LINE_LIMIT + 70000] = '\0';
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT) == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL && output_text[0] == '\0');
+    memset(bytes, 'x', 2 * STREAM_LINE_LIMIT);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT) == 1);
+    at = read_calls;
+    reset_faults();
+    fail_read_at = at - 1;
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT) == 2);
+    assert(strstr(error_text, strerror(EDOM)) != NULL && output_text[0] == '\0');
+    memset(bytes, 'x', STREAM_LINE_LIMIT + 1);
+    bytes[STREAM_LINE_LIMIT] = '\n';
+    memcpy(bytes + STREAM_LINE_LIMIT + 1, "alpha\n", 6);
     /* A NUL probe switches to binary, not the line-limit error. */
     memcpy(bytes, "alpha", 5);
     bytes[STREAM_LINE_LIMIT] = '\0';

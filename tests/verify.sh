@@ -58,4 +58,5 @@ python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 7 --jobs 8
 python3 -I tests/difftest.py "$BUILD/cgrep" --cases 3000 --seed 42 --jobs 8
 python3 -I tests/ignore_difftest.py "$BUILD/cgrep" --cases 1000 --seed 7
 python3 -I tests/ignore_difftest.py "$BUILD/cgrep" --cases 1000 --seed 42 --jobs 8
+python3 -I tests/long_difftest.py "$BUILD/cgrep" --cases 60 --seed 7
 printf 'acceptance: PASS (optional authority/regions/CBMC checks may be skipped; semantics is bounded)\n'
