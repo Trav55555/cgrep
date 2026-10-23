@@ -169,13 +169,13 @@ static void remove_tree(void)
         "e/keep", "e/x", "e/sub/x", "e/sub/deep/x", "e/sub/foo", "e/sub/]", "e/sub/[", "e/sub/end\n", "e/sub/f\\o",
         "e/blocked/keep", "e/tail/keep",
         "w/common/info/exclude", "w/common/worktrees/wt/commondir", "w/common/worktrees/wt/info/exclude",
-        "w/tree/.git", "w/tree/shared", "w/tree/own", "w/tree/kept"};
+        "w/tree/.git", "w/tree/shared", "w/tree/own", "w/tree/kept", "v/bin", "v/text"};
     static const char *const dirs[] = {"r/a/deep", "r/a", "r/b", "r/.hid", "r/empty", "r/locked", "r",
         "g/sub/deep", "g/sub", "g/out", "g/lib", "g/.git/info", "g/.git", "g", "xdg/git",
         "xdg/.config/git", "xdg/.config", "xdg",
         "e/sub/deep", "e/sub", "e/blocked", "e/tail", "e",
         "w/common/worktrees/wt/info", "w/common/worktrees/wt", "w/common/worktrees", "w/common/info",
-        "w/common", "w/tree", "w"};
+        "w/common", "w/tree", "w", "v"};
     char p[600];
     size_t i;
 
@@ -545,6 +545,7 @@ int main(void)
     static const char *const workers[] = {"-j4", "alpha", "@r"};
     static const char *const locked[] = {"alpha", "@r/a", "@r/locked"};
     static const char *const binary_list[] = {"-l", "al", "@r/b"};
+    static const char *const inverted_list[] = {"-lv", "alpha", "@v"};
     const char *tmp;
     char p[600];
     int listable;
@@ -605,6 +606,13 @@ int main(void)
     assert(strcmp(out_text, "r/b/bin\nr/b/x\n") == 0);
     assert(run(3, binary_count) == 0);
     assert(strcmp(out_text, "r/b/x:1\n") == 0);
+    /* -l -v reads a walked file through: a NUL long after its first
+     * selected line still drops it, as for a count. */
+    make_dir("v");
+    make_file("v/bin", "\nx\nx\0\n", 6);
+    make_file("v/text", "beta\n", 5);
+    assert(run(3, inverted_list) == 0);
+    assert(strcmp(out_text, "v/text\n") == 0 && err_text[0] == '\0');
     assert(run(2, slash) == 0);
     assert(strcmp(out_text, "r/b/x:alpha\n") == 0);
     assert(run(2, empty) == 1 && out_text[0] == '\0' && err_text[0] == '\0');
