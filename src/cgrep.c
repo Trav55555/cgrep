@@ -1324,7 +1324,10 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
         return result;
     }
     if (s->count || s->files) {
-        scan_stream(s, in, buffer, 0, s->count ? SELECT_COUNT : SELECT_FIRST, &total, &selected, &result);
+        /* With -l -v the reference reads a walked input through, as for a
+         * count, so a NUL anywhere drops it; -l alone stops at a match. */
+        scan_stream(s, in, buffer, 0, s->count || (s->invert && s->walked) ? SELECT_COUNT : SELECT_FIRST,
+                    &total, &selected, &result);
         if (result.error == SCAN_OK && result.matched && !summary(s, name, selected))
             result.error = SCAN_OUTPUT;
         result.bytes = total;

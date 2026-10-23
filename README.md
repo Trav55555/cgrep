@@ -204,7 +204,7 @@ default and the [performance status](docs/PERFORMANCE.md).
 | Patterns | Literal text only. Regex and terminal formatting are not implemented. |
 | Text lines | At most 8 MiB before LF can be printed. Exactly-at-limit lines work with LF or EOF. A longer line is read through and skipped when it is not selected; a selected one reports an error, status 2, and the search continues with later inputs. A NUL inside it stops a walked file as any NUL does; in a named file it reports the line limit. |
 | Count and filename modes | `-c` and `-l` keep no lines and treat NUL bytes as line ends. The 8 MiB line limit does not apply. |
-| Binary input | Printing stops with a warning once a match and a NUL have been observed. Earlier printed lines remain visible. `-c` drops binary inputs. |
+| Binary input | Printing stops with a warning once a match and a NUL have been observed. Earlier printed lines remain visible. `-c` drops binary inputs, and so does `-l -v` for files found while walking, which it reads through. |
 | Encoding | No BOM stripping or encoding conversion. CRLF is preserved. Matching final unterminated text lines receive a newline. |
 | Case and words | `-i` does not fold `é` to `É`. `-w` treats all non-ASCII characters as word characters, including punctuation. |
 | Ignore patterns | Malformed patterns lack ripgrep's diagnostics and can behave differently. A trailing space escaped by an odd run of backslashes is kept, as Git reads it; ripgrep 14 keeps it after any backslash. |
