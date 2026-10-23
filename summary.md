@@ -1,10 +1,10 @@
 | Tree | Query | One thread: cgrep (ms) | rg (ms) | cgrep vs rg | Default threads: cgrep (ms) | rg (ms) | cgrep vs rg |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| wide: 20,000 files, 1 dir | -l WORD | 107.58 | 128.61 | 1.20x faster | 45.04 | 53.05 | 1.18x faster |
-| wide: 20,000 files, 1 dir | WORD (lines) | 107.27 | 131.68 | 1.23x faster | 44.32 | 54.16 | 1.22x faster |
-| manydirs: 9,330 files, 1,555 dirs | -l WORD | 63.13 | 86.45 | 1.37x faster | 24.09 | 29.74 | 1.23x faster |
-| manydirs: 9,330 files, 1,555 dirs | WORD (lines) | 62.92 | 86.52 | 1.38x faster | 23.72 | 29.89 | 1.26x faster |
-| mixed: 5,016 files, 52 dirs | -l WORD | 45.81 | 50.57 | 1.10x faster | 18.48 | 20.82 | 1.13x faster |
-| mixed: 5,016 files, 52 dirs | WORD (lines) | 46.28 | 51.29 | 1.11x faster | 18.10 | 21.37 | 1.18x faster |
+| wide: 20,000 files, 1 dir | -l WORD | 132.13 | 161.37 | 1.22x faster | 60.68 | 68.01 | 1.12x faster |
+| wide: 20,000 files, 1 dir | WORD (lines) | 132.86 | 165.73 | 1.25x faster | 60.87 | 68.95 | 1.13x faster |
+| manydirs: 9,330 files, 1,555 dirs | -l WORD | 75.93 | 106.36 | 1.40x faster | 31.68 | 40.99 | 1.29x faster |
+| manydirs: 9,330 files, 1,555 dirs | WORD (lines) | 75.02 | 106.11 | 1.41x faster | 31.32 | 40.75 | 1.30x faster |
+| mixed: 5,016 files, 52 dirs | -l WORD | 62.24 | 69.95 | 1.12x faster | 26.10 | 27.79 | 1.06x faster |
+| mixed: 5,016 files, 52 dirs | WORD (lines) | 63.70 | 72.10 | 1.13x faster | 26.84 | 28.76 | 1.07x faster |
 
-Median wall time of 15 warm runs, process startup included. cgrep 0.1.0 (7998dd4, c-utils b74b8a9) at 7998dd4; ripgrep 15.2.0 (rev e89fff89ac). One thread: cgrep -j1, rg -j1 --sort path. Default threads: no thread option, so each tool uses its own default thread count. GitHub-hosted ubuntu-24.04 runner, 4 CPUs, AMD EPYC 9V45 96-Core Processor. Shared CI runners are noisy: compare ratios, not absolute times.
+Median wall time of 15 warm runs, process startup included. cgrep 0.1.0 (312f5f8, c-utils b74b8a9) at 312f5f8; ripgrep 15.2.0 (rev e89fff89ac). One thread: cgrep -j1, rg -j1 --sort path. Default threads: no thread option, so each tool uses its own default thread count. GitHub-hosted ubuntu-24.04 runner, 4 CPUs, AMD EPYC 7763 64-Core Processor. Shared CI runners are noisy: compare ratios, not absolute times.

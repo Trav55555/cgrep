@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "cgrep vs rg (defaults)",
-  "message": "1.20x faster (geomean)",
+  "message": "1.16x faster (geomean)",
   "color": "2ea44f"
 }
