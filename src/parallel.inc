@@ -16,9 +16,12 @@
 #ifndef CGREP_POOL_FREE
 #define CGREP_POOL_FREE free
 #endif
-#define CHANNEL_SLOTS 2
+/* A worker can run CHANNEL_SLOTS - 1 batches ahead of the coordinator.
+ * Eight slots of 256 KiB keep each worker's 2 MiB of output space and let
+ * workers pass an input slow to search instead of waiting behind it. */
+#define CHANNEL_SLOTS 8
 #ifndef CHANNEL_BYTES
-#define CHANNEL_BYTES 1048576
+#define CHANNEL_BYTES 262144
 #endif
 /* Workers poll the shared cancellation flag once per this many refills. */
 #define CANCEL_POLL 8
@@ -42,7 +45,7 @@
 #define INPUT_BUFFER 65536
 
 /* FREE slots belong to their worker; published slots to the coordinator.
- * CHUNK: more of the batch follows in the worker's other slot. DONE: the
+ * CHUNK: more of the batch follows in the worker's next slot. DONE: the
  * batch ends in this slot. */
 typedef enum { SLOT_FREE, SLOT_CHUNK, SLOT_DONE } SlotState;
 
@@ -109,9 +112,9 @@ struct ParallelPool {
     int listed; /* list_inputs has returned */
     int listing_failed;
     unsigned long claims;
-    /* Claimed batches not yet consumed. A worker holds at most two (one
-     * published, one being scanned), so the ring never fills. */
-    ParallelBatch ring[2 * MAX_WORKERS + 2];
+    /* Claimed batches not yet consumed. A worker holds at most one per
+     * slot, so the ring never fills. */
+    ParallelBatch ring[CHANNEL_SLOTS * MAX_WORKERS + 2];
     int ring_head;
     int ring_len;
     /* The walker thread's diagnostics: a memory stream it writes outside
@@ -637,7 +640,7 @@ static int worker_cancelled(void *context)
     return worker->cancelled;
 }
 
-/* Hand the filled slot to the coordinator and continue in the other one
+/* Hand the filled slot to the coordinator and continue in the next one
  * once it is free. Zero means cancellation. */
 static int worker_publish(ParallelWorker *worker)
 {
@@ -889,7 +892,7 @@ static void worker_main(void *context)
             serial = worker_scan(worker, &search, &buffer, &result);
             if (worker->cancelled)
                 break;
-            /* The scan may have spilled into the other slot. */
+            /* The scan may have spilled into later slots. */
             slot = &worker->slots[worker->fill];
             record = &slot->record[slot->records++];
             record->path = worker->path;

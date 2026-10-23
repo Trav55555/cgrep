@@ -443,8 +443,8 @@ glibc's unlocked stdio. Caller-owned library streams keep their existing
 setup. Build with `-DCGREP_NO_SIMD` to force portable code.
 
 Worker `w` searches paths `w`, `w + N`, and so on. Each started worker has
-its own input window and two 1 MiB output slots, so it can search its next
-file while the coordinator writes the previous one. Slots are allocated
+its own input window and eight 256 KiB output slots, so it can search
+later files while the coordinator writes earlier ones. Slots are allocated
 only for started workers. c-utils supplies threads, mutexes, and broadcast
 conditions. Worker stacks are 256 KiB. The pool joins the workers, destroys
 the synchronization objects, then releases their arena-owned records.
