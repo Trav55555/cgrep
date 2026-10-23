@@ -52,7 +52,7 @@ Pool
 Worker
   persistent pthread, parent Pool pointer, own condition
   claims a batch of consecutive inputs once its fill slot is free
-  two 1 MiB output slots: FREE (worker-owned) or CHUNK / DONE
+  eight 256 KiB output slots: FREE (worker-owned) or CHUNK / DONE
   each slot records the inputs whose output ends in it: path, end
   offset, ScanResult, serial flag (non-regular: coordinator searches it)
   next claim size, doubling while inputs stay small
@@ -71,7 +71,7 @@ parallel_search(search, listing, jobs, in, out, err, status)
 
 Only the coordinator writes caller stdout/stderr. A slot's bytes and records
 are worker owned while FREE and coordinator owned while CHUNK or DONE. A
-worker publishes a full slot as a CHUNK and continues in its other slot once
+worker publishes a full slot as a CHUNK and continues in its next slot once
 that is free, so a batch's output may span many slots; the batch ends with a
 DONE slot. The coordinator consumes batches in claim order, which is input
 order, so argument order holds without per-file assignment. A worker claims
@@ -157,6 +157,14 @@ Measured on 16 x 4 MiB mixed-text files with about 1.5 MiB of output each,
 27.6 ms and 1 MiB slots 13.7 ms (see
 [the performance review](PERFORMANCE-REVIEW-20261014.md)). Eight workers
 reserve 16 MiB of slots, which the kernel commits only as output fills them.
+
+With two slots a worker could run only one batch ahead, so an input slow to
+search held every other worker once they had filled theirs. Eight slots of
+256 KiB keep 2 MiB per worker and let workers run seven batches ahead. On a
+home projects tree (336k files, 12 CPUs) the change measured 1,942 to 1,697
+ms and 1,941 to 1,767 ms for `-c`, and 1,493 to 1,405 ms and 1,562 to 1,517
+ms for `-l`, in two rounds under outside load; 128 files printing 0.8 MiB
+each measured within noise (29.0 against 31.2 ms, then 35.3 against 33.0).
 
 The worker opens with nonblocking flags and verifies the descriptor is regular.
 A raced non-regular path requests serial handling only when the coordinator
