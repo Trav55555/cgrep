@@ -623,31 +623,118 @@ static void fold_ascii(char *dst, const char *src, size_t n)
         dst[i] = (char)(src[i] >= 'A' && src[i] <= 'Z' ? src[i] + 32 : src[i]);
 }
 
-/* -w word bytes: ASCII letters, digits and '_', and every byte from 0x80,
- * which counts all non-ASCII characters as word characters (the reference
- * classifies them with Unicode tables). LF is not a word byte. */
-static int word_byte(char c)
-{
-    unsigned char u;
+#include "word.inc"
 
-    u = (unsigned char)c;
-    return u >= 0x80 || u == '_' || (u >= '0' && u <= '9') || ((u | 32) >= 'a' && (u | 32) <= 'z');
+/* -w classifies the character on each side of a match, as the reference's
+ * \w does: a valid UTF-8 character is a word character when word_ranges
+ * holds it; bytes that do not form one count as word characters, since
+ * \W never matches them. A line's ends, LF and CR are not. The character
+ * before a match spans at most WORD_CONTEXT bytes. */
+#define WORD_CONTEXT 4
+enum { WORD_NO, WORD_YES, WORD_OPEN };
+
+static int word_point(unsigned long c)
+{
+    size_t lo;
+    size_t hi;
+    size_t mid;
+
+    if (c < 0x80)
+        return c == '_' || (c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'z');
+    lo = 0;
+    hi = sizeof word_ranges / sizeof word_ranges[0];
+    while (lo < hi) {
+        mid = lo + (hi - lo) / 2;
+        if (c < word_ranges[mid][0])
+            hi = mid;
+        else if (c > word_ranges[mid][1])
+            lo = mid + 1;
+        else
+            return 1;
+    }
+    return 0;
 }
 
-/* hay[m, m + len) has no word byte just before or after it. Offset 0 and
- * hay.len count as line boundaries. */
-static int word_bounded(CuStr hay, size_t m, size_t len)
+/* The byte length of the UTF-8 sequence lead byte c starts, 0 for none. */
+static size_t utf8_length(unsigned char c)
 {
-    return (m == 0 || !word_byte(hay.ptr[m - 1])) &&
-           (m + len == hay.len || !word_byte(hay.ptr[m + len]));
+    if (c < 0x80)
+        return 1;
+    if (c >= 0xc2 && c <= 0xdf)
+        return 2;
+    if (c >= 0xe0 && c <= 0xef)
+        return 3;
+    return c >= 0xf0 && c <= 0xf4 ? 4 : 0;
 }
 
-/* A -w match ending at an open window's end, whose next byte is unread. */
+/* Word class of the n-byte sequence at p, whose lead utf8_length gave n:
+ * bad continuation bytes, overlong forms, surrogates and code points past
+ * U+10FFFF are not characters, so they count as word characters. */
+static int word_sequence(const unsigned char *p, size_t n)
+{
+    unsigned long c;
+    size_t i;
+
+    if (n == 1)
+        return word_point(p[0]);
+    c = (unsigned long)p[0] & (n == 2 ? 0x1fUL : n == 3 ? 0x0fUL : 0x07UL);
+    for (i = 1; i < n; i++) {
+        if ((p[i] & 0xc0) != 0x80)
+            return 1;
+        c = c << 6 | (unsigned long)(p[i] & 0x3f);
+    }
+    if ((n == 3 && (c < 0x800 || (c >= 0xd800 && c <= 0xdfff))) || (n == 4 && (c < 0x10000 || c > 0x10ffffUL)))
+        return 1;
+    return word_point(c);
+}
+
+/* Whether the character ending at hay[m] is a word character. Offset 0
+ * is a line boundary; the caller keeps WORD_CONTEXT bytes before any
+ * candidate that is not at one. */
+static int word_before(CuStr hay, size_t m)
+{
+    const unsigned char *p;
+    size_t at;
+
+    p = (const unsigned char *)hay.ptr;
+    if (m == 0)
+        return 0;
+    at = m - 1;
+    while (at > 0 && m - at < WORD_CONTEXT && (p[at] & 0xc0) == 0x80)
+        at--;
+    return utf8_length(p[at]) != m - at || word_sequence(p + at, m - at);
+}
+
+/* The class of the character starting at hay[at]. With open_end, hay.len
+ * is not a line end, and a character it cuts off is WORD_OPEN. */
+static int word_after(CuStr hay, size_t at, int open_end)
+{
+    const unsigned char *p;
+    size_t n;
+    size_t i;
+
+    p = (const unsigned char *)hay.ptr;
+    if (at == hay.len)
+        return open_end ? WORD_OPEN : WORD_NO;
+    n = utf8_length(p[at]);
+    if (n == 0)
+        return WORD_YES;
+    for (i = 1; i < n; i++) {
+        if (at + i == hay.len)
+            return open_end ? WORD_OPEN : WORD_YES;
+        if ((p[at + i] & 0xc0) != 0x80)
+            return WORD_YES;
+    }
+    return word_sequence(p + at, n) ? WORD_YES : WORD_NO;
+}
+
+/* A -w match whose next character an open window's end cuts off. */
 #define UNDECIDED ((size_t)-2)
 
-/* First match at or after pos, with -w only one bounded by non-word bytes.
- * With open_end, hay.len is not a line end, and a match ending there is
- * UNDECIDED (*undecided gets its start). Once a line's first candidate
+/* First match at or after pos, with -w only one with a non-word character
+ * or line end on each side. With open_end, hay.len is not a line end, and
+ * a match whose next character it cuts off is UNDECIDED (*undecided gets
+ * its start). Once a line's first candidate
  * fails its bounds, KMP finds the rest of that line's occurrences, so
  * total work stays linear. */
 static size_t find_selected(const Search *s, CuStr hay, size_t pos, Finder *f, int open_end,
@@ -661,6 +748,7 @@ static size_t find_selected(const Search *s, CuStr hay, size_t pos, Finder *f, i
     size_t state;
     size_t end;
     size_t at;
+    int after;
 
     literal = &s->literal;
     if (!s->word)
@@ -677,12 +765,15 @@ static size_t find_selected(const Search *s, CuStr hay, size_t pos, Finder *f, i
         state = 0;
         at = m + 1;
         for (;;) {
-            if (open_end && m + len == hay.len) {
-                *undecided = m;
-                return UNDECIDED;
+            if (!word_before(hay, m)) {
+                after = word_after(hay, m + len, open_end);
+                if (after == WORD_OPEN) {
+                    *undecided = m;
+                    return UNDECIDED;
+                }
+                if (after == WORD_NO)
+                    return m;
             }
-            if (word_bounded(hay, m, len))
-                return m;
             if (len == 0) {
                 if (m == stop)
                     break;
@@ -955,7 +1046,7 @@ static void nul_to_lf(char *p, size_t n)
 typedef struct {
     int marked;             /* the current line has a match */
     int open;               /* the current line has bytes */
-    int mid;                /* -w: the window's first byte was carried
+    int mid;                /* -w: the window's first bytes were carried
                              * mid-line, as context already scanned */
     unsigned long selected;
 } LineScan;
@@ -983,12 +1074,13 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
     size_t m;
     size_t at;
     size_t undecided;
+    size_t context;
 
     pos = 0;
     for (;;) {
         /* -w needs each candidate's previous byte: a carried first byte
          * is only context. */
-        from = pos == 0 && ls->mid && s->word ? 1 : pos;
+        from = pos == 0 && s->word ? (size_t)ls->mid : pos;
         m = NO_MATCH;
         if (!s->invert && !ls->marked) {
             /* Search the rest of the window at once and delimit only the
@@ -1013,15 +1105,16 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
                                   &undecided);
         }
         if (m == UNDECIDED) {
-            /* Rescan once the next byte is read: from the byte before the
+            /* Rescan once more is read: from the character before the
              * candidate as context, or from its line's start. Carrying the
              * previous line's LF would end a line twice. */
             if (undecided > pos) {
-                *carry = w.len - (undecided - 1);
-                ls->mid = 1;
+                context = undecided - pos < WORD_CONTEXT ? undecided - pos : WORD_CONTEXT;
+                *carry = w.len - (undecided - context);
+                ls->mid = (int)context;
             } else {
                 *carry = w.len - pos;
-                ls->mid = pos == 0 && ls->mid;
+                ls->mid = pos == 0 ? ls->mid : 0;
             }
             ls->open |= pos < w.len;
             return 0;
@@ -1061,17 +1154,19 @@ static int scan_window(const Search *s, CuStr w, int at_end, SelectMode mode, Fi
         return 0;
     }
     /* A match still to complete has fewer than len bytes here; -w also
-     * keeps the byte before it. */
+     * keeps the character before it. */
     keep = s->literal.text.len;
-    if (!s->word && keep != 0)
+    if (keep != 0)
         keep--;
+    if (s->word)
+        keep += WORD_CONTEXT;
     if (!ls->marked) {
         if (w.len - pos <= keep) {
             *carry = w.len - pos;
-            ls->mid = pos == 0 && ls->mid;
+            ls->mid = pos == 0 ? ls->mid : 0;
         } else {
             *carry = keep;
-            ls->mid = 1;
+            ls->mid = s->word ? WORD_CONTEXT : 0;
         }
     }
     return 0;

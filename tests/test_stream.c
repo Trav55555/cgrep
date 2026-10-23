@@ -396,6 +396,11 @@ static void test_streamed_words(void)
     static const char *const empty_invert[] = {"-wvc", ""};
     static const char *const folded[] = {"-ic", "AA"};
     static const char *const plain_count[] = {"-c", "ab"};
+    /* Unicode neighbors (the reference's counts): U+3001 and an emoji are
+     * not word characters; e-acute and a CJK ideograph are; an invalid
+     * byte counts as one. Each is cut by every read size below. */
+    static const char unicode[] = "x aa\343\200\201 y\naa\303\251\n\346\227\245aa\n"
+                                  "\343\200\201aa\naa\360\237\230\200\naa\377\n";
     static const size_t limits[] = {1, 2, 3, 7};
     size_t i;
 
@@ -423,6 +428,17 @@ static void test_streamed_words(void)
         read_limit = limits[i];
         assert(run(2, folded, "aA b\nAa\nx\n", 10) == 0);
         assert(strcmp(output_text, "2\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_count, unicode, sizeof unicode - 1) == 0);
+        assert(strcmp(output_text, "3\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_invert, unicode, sizeof unicode - 1) == 0);
+        assert(strcmp(output_text, "3\n") == 0);
+        reset_faults();
+        read_limit = limits[i];
+        assert(run(2, word_list, "aa\303\251\n", 5) == 1 && output_text[0] == '\0');
         /* Without -w a match may start at the carried first byte. */
         reset_faults();
         read_limit = limits[i];
