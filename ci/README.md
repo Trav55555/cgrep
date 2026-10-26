@@ -1,9 +1,13 @@
 # Gitea acceptance CI
 
 The [workflow](../.gitea/workflows/ci.yml) runs full acceptance for trusted
-maintainer pushes to the configured repository's `main` branch. It has no
-deployment or pull-request trigger. Repository and actor restrictions are
-defined in the workflow.
+maintainer pushes to the configured repository's `main` branch, with cgrep
+at dcheck's gate tier. Every night at 07:00 UTC, and when started by hand
+from the Actions tab (`workflow_dispatch`), it runs the same acceptance
+with cgrep at the deep tier (Cerberus semantics, Valgrind, fuzzing, CBMC)
+and reports its findings; see [Nightly findings](#nightly-findings). It has
+no deployment or pull-request trigger. Repository and actor restrictions
+are defined in the workflow; a scheduled run requires only the repository.
 
 The Linux x86_64 host runner is scoped to the CI repository. Match the label
 in the workflow when registering it. Do not expose this runner to untrusted
@@ -63,7 +67,8 @@ before adoption or profile updates.
 Keep runner configuration and registration credentials outside the
 repository. Before accepting jobs, configure the `tea` login required by the
 [dependency fetcher](fetch_dependencies.py) with read access to the pinned
-dependency archives. The fetcher uses HTTPS. CI never copies the tea
+dependency archives and write access to this repository's issues, for the
+nightly findings. The fetcher uses HTTPS. CI never copies the tea
 credential into the checkout, environment, or artifacts.
 
 `dependencies.json` pins both complete commit IDs and Git tree IDs.
@@ -72,6 +77,27 @@ duplicate paths, and oversized inputs. It reconstructs each Git tree and
 rejects mismatches before running code. Update commit and tree pins together
 only after verifying the new dependency. This checks source contents, not
 commit signatures or the identity of the Gitea operator.
+
+## Nightly findings
+
+The nightly calls `ci/verify.sh deep`. After collecting the artifacts and
+releasing the lock, [`findings.py`](findings.py) judges the run from
+cgrep's dcheck result (`cgrep.json`) and the acceptance exit status. The
+run passes only if acceptance passed and every check that
+`tests/check_receipt.py` requires at deep is among the result's passes, so
+none passes by being skipped. It prints each check's status to the job log
+and keeps one open issue titled "Nightly findings": a failing run opens
+it, or replaces its description with the current findings and comments; a
+passing run comments and closes it. A finding is a failed check with its
+diagnostics (`file:line` and rule where dcheck gives them) and the last 60
+lines of its log. A run that fails before dcheck produces a result, or
+after it, is quoted from the end of `acceptance.log` (the selftest log if
+acceptance never started). The issue calls use
+the same `tea` login as the dependency fetcher, retried briefly; a Gitea
+failure there is reported and does not change the verdict.
+
+These findings are what to work from. Run the gate locally and leave deep
+to the nightly, unless a fix to a nightly finding needs confirming sooner.
 
 ## Inspect a run
 
@@ -106,10 +132,11 @@ python3 -I ci/check_artifacts.py /path/to/extracted-bundle --receipts
 
 The first command verifies the exact inventory, sizes, hashes, and recorded
 status. It can succeed for a valid failure bundle and prints that failure's
-exit code. `--receipts` refuses failed acceptance and checks the dependency,
-CLI, and deep receipts. Both commands reject symlinks, unlisted files, missing
-successful evidence, and inconsistent status. Hashes check contents, not the
-uploader's identity or the truth of a forged manifest.
+exit code. `--receipts` refuses failed acceptance and checks the dependency
+and CLI receipts, and cgrep's at the tier recorded in `metadata.json`. Both
+commands reject symlinks, unlisted files, missing successful evidence, and
+inconsistent status. Hashes check contents, not the uploader's identity or
+the truth of a forged manifest.
 
 The latest local pilot used real count/filename acceptance receipts with a
 retained selftest log from the unchanged pinned toolchain. It exercised the
@@ -124,11 +151,12 @@ A required PASS means both the process and receipt checks succeeded. Optional au
 CBMC proofs, and tcc exclusions remain explicit. Semantics is bounded and
 does not interpret pthreads.
 
-For a local pilot with the same source acquisition and commands:
+For a local pilot with the same source acquisition and commands (`deep`
+for the nightly's; without `GITHUB_REPOSITORY` it leaves the issue alone):
 
 ```sh
 mkdir -p /tmp/cgrep-ci-pilot
-RUNNER_TEMP=/tmp/cgrep-ci-pilot bash ci/verify.sh
+RUNNER_TEMP=/tmp/cgrep-ci-pilot bash ci/verify.sh gate
 ```
 
 Use a fresh checkout and the provisioned runner environment. Local pilots

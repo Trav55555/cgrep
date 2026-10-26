@@ -25,8 +25,13 @@ def check(bundle):
     if bundle.is_symlink() or not bundle.is_dir():
         raise ValueError("bundle must be a regular directory")
     metadata = json.loads(read_file(bundle / "metadata.json"))
-    if not isinstance(metadata, dict) or metadata.get("schema") != "cgrep.ci-artifacts/0":
+    if not isinstance(metadata, dict) or metadata.get("schema") not in {"cgrep.ci-artifacts/0", "cgrep.ci-artifacts/1"}:
         raise ValueError("unsupported artifact metadata")
+    # Schema 0 bundles predate the tier and always ran deep.
+    if metadata["schema"] == "cgrep.ci-artifacts/0":
+        metadata["tier"] = "deep"
+    if metadata.get("tier") not in {"gate", "deep"}:
+        raise ValueError("invalid acceptance tier")
     status = metadata.get("acceptance_exit_code")
     if type(status) is not int or not 0 <= status <= 255 or type(metadata.get("complete_success")) is not bool or metadata["complete_success"] != (status == 0):
         raise ValueError("inconsistent acceptance status")
@@ -62,7 +67,7 @@ def main():
         if args.receipts:
             if metadata["acceptance_exit_code"] != 0:
                 raise ValueError("recorded acceptance failed; bundle integrity does not imply PASS")
-            for name, tier in [("c-utils", "gate"), ("cli", "fast"), ("cgrep", "deep")]:
+            for name, tier in [("c-utils", "gate"), ("cli", "fast"), ("cgrep", metadata["tier"])]:
                 subprocess.run(["python3", "-I", str(ROOT / "tests/check_receipt.py"), str(args.bundle / (name + ".json")), tier], check=True)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise SystemExit("invalid artifact bundle: " + str(error))

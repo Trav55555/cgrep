@@ -263,7 +263,7 @@ Choose additional checks by the behavior you change:
 | `make difftest` | 400 generated comparisons against ripgrep | Python 3 and `rg` on PATH |
 | `make iotest` | Native allocation, resource-limit, and output-failure checks | Python 3 |
 | `make check` | Compiler matrix, sanitizers, wasm, coverage, CLI checks, and I/O budgets | Dependable C checker toolchain and its prerequisites |
-| `make verify` | Complete resource-capped acceptance, including dependency checks | The provisioned checker profile and required native tools |
+| `make verify` | Complete resource-capped acceptance at dcheck's gate tier, including dependency checks; `VERIFY_TIER=deep` for the deep tier | The provisioned checker profile and required native tools |
 | `make mutate` | Isolated mutation runs for `src/cgrep.c` and `src/ignore.inc` | The installed c-verification mutation runner |
 
 <details>
@@ -298,18 +298,20 @@ The command selects hash-validated Cerberus and Valgrind from the profile.
 Missing or stale profiles fail instead of using known-broken installed
 checkers. Temporary PATH or opam overrides are not needed.
 
-Acceptance runs c-utils' tests and gate, CLI entry checks, framing and
-serial controls, native worker controls, cgrep's deep checks, and executable
-I/O budgets. It includes 12,000 ordinary differential cases across seeds
+Acceptance runs c-utils' tests and gate, CLI entry checks, framing
+controls, native worker controls, cgrep's gate checks, and executable I/O
+budgets. It includes 12,000 ordinary differential cases across seeds
 7 and 42 at `-j1` and `-j8`, plus 2,000 ignore-file comparisons. It also
 checks that unsupported mutation selectors cannot reach the runner.
+`make verify VERIFY_TIER=deep` runs cgrep's deep checks instead of its
+gate, with the serial controls that seed defects for Cerberus.
 
 Missing required checks and unexpected skips fail acceptance. Authority,
 regions, absent CBMC proofs, and optional tcc remain outside the required
 profile. Cerberus uses the explicitly bounded
 [semantics suite](semantics/README.md), not a full-program proof. Native
-tests and both fuzz targets remain included. Text and JSON results name
-the selected semantics suite.
+tests remain included, and the deep tier runs both fuzz targets. Text
+and JSON results name the selected semantics suite.
 
 Receipts are written under `build/verify.*`. This target checks correctness
 and resource behavior, not benchmark parity. The
@@ -406,6 +408,9 @@ python3 -I tests/fuzz_seeds.py --write
 ```
 
 `dcheck deep` runs the fuzz targets when the required tools exist.
+Run the gate locally and leave deep to the nightly CI run, unless a fix
+to a nightly finding needs confirming sooner with
+`make verify VERIFY_TIER=deep`.
 
 </details>
 

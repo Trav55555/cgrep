@@ -1,16 +1,30 @@
 name: Cgrep acceptance
 
+# A push to main runs acceptance at the gate tier. The nightly (07:00 UTC;
+# Gitea schedules in UTC) and a run started by hand run it at the deep tier
+# and keep the "Nightly findings" issue (ci/README.md).
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
 
+# Separate groups, so a queued push cannot displace a queued nightly or the
+# reverse; ci/verify.sh's lock still runs one acceptance at a time.
 concurrency:
-  group: cgrep-acceptance
+  group: cgrep-${{ github.event_name == 'push' && 'acceptance' || 'nightly' }}
   cancel-in-progress: false
 
 jobs:
   acceptance:
-    if: github.event_name == 'push' && github.repository == 'trav/cgrep' && github.actor == 'trav'
+    # A scheduled run's actor need not be trav (Gitea may attribute it to
+    # whoever last changed the schedule). The server starts it from the
+    # default branch's workflow, so it needs only the repository match.
+    # Push and workflow_dispatch also require the trusted actor.
+    if: >-
+      github.repository == 'trav/cgrep' && (github.event_name == 'schedule' ||
+      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == 'trav'))
     runs-on: cgrep-x86_64-3g
     timeout-minutes: 40
     steps:
@@ -18,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Full capped acceptance with pinned siblings
-        run: bash ci/verify.sh
+        run: bash ci/verify.sh ${{ github.event_name == 'push' && 'gate' || 'deep' }}
       - name: Retain acceptance evidence on pass or failure
         if: always()
         # v3.1.3 uses the legacy artifact protocol/node16 action descriptor.

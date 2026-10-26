@@ -14,6 +14,7 @@ import shutil
 LOGS = ["toolchain-selftest.log", "acceptance.log"]
 RECEIPTS = ["c-utils.json", "cli.json", "cgrep.json"]
 MAX_FILE = 32 * 1024 * 1024
+TIERS = ["gate", "deep"]
 
 
 def copy_file(source, destination):
@@ -25,9 +26,9 @@ def copy_file(source, destination):
             "sha256": hashlib.sha256(destination.read_bytes()).hexdigest()}
 
 
-def collect(work, output, status, revision):
-    if not 0 <= status <= 255 or (revision and not re.fullmatch("[0-9a-f]{40}", revision)):
-        raise ValueError("invalid status or revision")
+def collect(work, output, status, revision, tier):
+    if not 0 <= status <= 255 or (revision and not re.fullmatch("[0-9a-f]{40}", revision)) or tier not in TIERS:
+        raise ValueError("invalid status, revision or tier")
     if output.exists():
         raise ValueError("artifact destination must be fresh")
     output.mkdir(parents=True)
@@ -53,8 +54,8 @@ def collect(work, output, status, revision):
                     copied.append(copy_file(source, output / name))
     if status == 0 and (receipt is None or set(item["path"] for item in copied) != set(LOGS + RECEIPTS)):
         raise ValueError("successful CI run missing required artifact evidence")
-    metadata = {"schema": "cgrep.ci-artifacts/0", "recorded_utc": datetime.now(timezone.utc).isoformat(),
-                "revision": revision or None, "acceptance_exit_code": status,
+    metadata = {"schema": "cgrep.ci-artifacts/1", "recorded_utc": datetime.now(timezone.utc).isoformat(),
+                "revision": revision or None, "tier": tier, "acceptance_exit_code": status,
                 "complete_success": status == 0, "files": copied}
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print("CI artifact bundle:", output, "exit", status, "files", len(copied), flush=True)
@@ -67,8 +68,9 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--status", type=int, required=True)
     parser.add_argument("--revision", default="")
+    parser.add_argument("--tier", choices=TIERS, required=True)
     args = parser.parse_args()
-    collect(args.work, args.output, args.status, args.revision)
+    collect(args.work, args.output, args.status, args.revision, args.tier)
 
 
 if __name__ == "__main__":

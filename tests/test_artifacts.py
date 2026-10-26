@@ -31,13 +31,20 @@ def fixture(root):
     return work, receipt
 
 
+def check_receipt_policy(tier):
+    spec = importlib.util.spec_from_file_location("check_receipt", ROOT / "tests/check_receipt.py")
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    return policy.EXPECTED[tier]
+
+
 class ArtifactTests(unittest.TestCase):
     def test_allowlist_survives_job_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             work, _ = fixture(root)
             output = root / "upload"
-            metadata = artifacts.collect(work, output, 0, "a" * 40)
+            metadata = artifacts.collect(work, output, 0, "a" * 40, "gate")
             self.assertTrue(metadata["complete_success"])
             self.assertEqual(set(p.name for p in output.iterdir()), set(artifacts.LOGS + artifacts.RECEIPTS + ["metadata.json"]))
             shutil.rmtree(work)
@@ -53,11 +60,11 @@ class ArtifactTests(unittest.TestCase):
             work = root / "job"
             work.mkdir()
             (work / "toolchain-selftest.log").write_text("seeded selftest failure\n")
-            result = artifacts.collect(work, root / "upload", 7, "")
+            result = artifacts.collect(work, root / "upload", 7, "", "gate")
             self.assertEqual(result["acceptance_exit_code"], 7)
             self.assertFalse(result["complete_success"])
             with self.assertRaises(ValueError):
-                artifacts.collect(work, root / "false-pass", 0, "")
+                artifacts.collect(work, root / "false-pass", 0, "", "gate")
 
     def test_receipt_escape_and_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -65,12 +72,12 @@ class ArtifactTests(unittest.TestCase):
             work, receipt = fixture(root)
             (work / "acceptance.log").write_text(f"Acceptance receipts: {root}\n")
             with self.assertRaises(ValueError):
-                artifacts.collect(work, root / "escape", 1, "")
+                artifacts.collect(work, root / "escape", 1, "", "gate")
             (work / "acceptance.log").write_text(f"Acceptance receipts: {receipt}\n")
             (receipt / "cli.json").unlink()
             (receipt / "cli.json").symlink_to(work / ".runner")
             with self.assertRaises(ValueError):
-                artifacts.collect(work, root / "link", 0, "")
+                artifacts.collect(work, root / "link", 0, "", "gate")
 
     def test_exit_trap_preserves_failure(self):
         text = (ROOT / "ci/verify.sh").read_text()
@@ -78,7 +85,7 @@ class ArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             work, _ = fixture(root)
-            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\n' + trap + '\nexit 7\n'
+            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\ntier=gate\n' + trap + '\nexit 7\n'
             sandbox = root / "script"
             (sandbox / "ci").mkdir(parents=True)
             shutil.copyfile(ROOT / "ci/collect_artifacts.py", sandbox / "ci/collect_artifacts.py")
@@ -95,7 +102,7 @@ class ArtifactTests(unittest.TestCase):
             work, receipt = fixture(root)
             (receipt / "cli.json").unlink()
             (receipt / "cli.json").symlink_to(work / ".runner")
-            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\n' + trap + '\nexit 7\n'
+            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\ntier=gate\n' + trap + '\nexit 7\n'
             sandbox = root / "script"
             (sandbox / "ci").mkdir(parents=True)
             shutil.copyfile(ROOT / "ci/collect_artifacts.py", sandbox / "ci/collect_artifacts.py")
@@ -111,7 +118,7 @@ class ArtifactTests(unittest.TestCase):
             root = Path(temporary)
             work, _ = fixture(root)
             (work / "toolchain-selftest.log").unlink()
-            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\n' + trap + '\nexit 0\n'
+            script = 'set -euo pipefail\nroot="$1"\nwork="$2"\ntier=gate\n' + trap + '\nexit 0\n'
             sandbox = root / "script"
             (sandbox / "ci").mkdir(parents=True)
             shutil.copyfile(ROOT / "ci/collect_artifacts.py", sandbox / "ci/collect_artifacts.py")
@@ -125,7 +132,7 @@ class BundleTests(unittest.TestCase):
             root = Path(temporary)
             work, _ = fixture(root)
             output = root / "bundle"
-            artifacts.collect(work, output, 0, "a" * 40)
+            artifacts.collect(work, output, 0, "a" * 40, "gate")
             path = output / "cgrep.json"
             path.write_bytes(path.read_bytes().replace(b"fixture", b"fixturE"))
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
@@ -137,7 +144,7 @@ class BundleTests(unittest.TestCase):
                 root = Path(temporary)
                 work, _ = fixture(root)
                 output = root / "bundle"
-                metadata = artifacts.collect(work, output, 0, "a" * 40)
+                metadata = artifacts.collect(work, output, 0, "a" * 40, "gate")
                 if defect == "duplicate":
                     metadata["files"] = [metadata["files"][0], metadata["files"][0]]
                 elif defect == "escape":
@@ -166,7 +173,7 @@ class BundleTests(unittest.TestCase):
                 root = Path(temporary)
                 work, _ = fixture(root)
                 output = root / "bundle"
-                artifacts.collect(work, output, 0, "a" * 40)
+                artifacts.collect(work, output, 0, "a" * 40, "gate")
                 with (output / name).open("r+b") as stream:
                     stream.truncate(bundle_check.MAX_FILE + 1)
                 with self.assertRaisesRegex(ValueError, "oversized"):
@@ -177,7 +184,7 @@ class BundleTests(unittest.TestCase):
             root = Path(temporary)
             work, _ = fixture(root)
             output = root / "bundle"
-            artifacts.collect(work, output, 0, "a" * 40)
+            artifacts.collect(work, output, 0, "a" * 40, "gate")
             alias = root / "alias"
             alias.symlink_to(output, target_is_directory=True)
             with self.assertRaisesRegex(ValueError, "regular directory"):
@@ -194,7 +201,7 @@ class BundleTests(unittest.TestCase):
             work.mkdir()
             (work / "acceptance.log").write_text("seeded failure\n")
             output = root / "bundle"
-            artifacts.collect(work, output, 7, "")
+            artifacts.collect(work, output, 7, "", "gate")
             self.assertEqual(bundle_check.check(output)["acceptance_exit_code"], 7)
             result = subprocess.run(["python3", "-I", str(ROOT / "ci/check_artifacts.py"), str(output), "--receipts"], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
@@ -205,18 +212,54 @@ class BundleTests(unittest.TestCase):
             root = Path(temporary)
             work, _ = fixture(root)
             output = root / "bundle"
-            artifacts.collect(work, output, 0, "a" * 40)
+            artifacts.collect(work, output, 0, "a" * 40, "gate")
             self.assertTrue(bundle_check.check(output)["complete_success"])
             result = subprocess.run(["python3", "-I", str(ROOT / "ci/check_artifacts.py"), str(output), "--receipts"], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("schema", result.stderr)
+
+    def test_tier_is_recorded_and_checked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work, _ = fixture(root)
+            with self.assertRaises(ValueError):
+                artifacts.collect(work, root / "fast", 0, "a" * 40, "fast")
+            output = root / "bundle"
+            artifacts.collect(work, output, 0, "a" * 40, "deep")
+            self.assertEqual(bundle_check.check(output)["tier"], "deep")
+            metadata = json.loads((output / "metadata.json").read_text())
+            for schema, tier in [("cgrep.ci-artifacts/1", "fast"), ("cgrep.ci-artifacts/1", None)]:
+                (output / "metadata.json").write_text(json.dumps(dict(metadata, schema=schema, tier=tier)))
+                with self.assertRaisesRegex(ValueError, "tier"):
+                    bundle_check.check(output)
+            # Schema 0 bundles predate the tier; they always ran deep.
+            old = {k: v for k, v in metadata.items() if k != "tier"}
+            (output / "metadata.json").write_text(json.dumps(dict(old, schema="cgrep.ci-artifacts/0")))
+            self.assertEqual(bundle_check.check(output)["tier"], "deep")
+
+    def test_receipts_checked_at_the_recorded_tier(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work, receipt = fixture(root)
+            passing = lambda tier, names: json.dumps({
+                "schema": "dcheck.result/0", "tier": tier, "status": "pass", "failed": [],
+                "checks": [{"name": name, "status": "pass"} for name in sorted(names)]})
+            (receipt / "c-utils.json").write_text(passing("gate", check_receipt_policy("gate")))
+            (receipt / "cli.json").write_text(passing("fast", check_receipt_policy("fast")))
+            (receipt / "cgrep.json").write_text(passing("gate", check_receipt_policy("gate")))
+            command = ["python3", "-I", str(ROOT / "ci/check_artifacts.py")]
+            for tier, code in [("gate", 0), ("deep", 1)]:
+                output = root / tier
+                artifacts.collect(work, output, 0, "a" * 40, tier)
+                result = subprocess.run(command + [str(output), "--receipts"], capture_output=True, text=True)
+                self.assertEqual(result.returncode, code, result.stderr)
 
     def test_local_archive_retrieval_after_job_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             work, _ = fixture(root)
             output = root / "bundle"
-            expected = artifacts.collect(work, output, 0, "a" * 40)
+            expected = artifacts.collect(work, output, 0, "a" * 40, "gate")
             archive = root / "artifact.zip"
             with zipfile.ZipFile(archive, "w") as stream:
                 for path in output.iterdir():

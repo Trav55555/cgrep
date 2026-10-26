@@ -6,6 +6,7 @@ DCHECK ?= $(HOME)/projects/dependable-c-agent-toolchain/bin/dcheck
 STRICT = -std=c89 -pedantic-errors -Wall -Wextra -Werror
 CFLAGS ?= -g -O2
 BUILD ?= build
+VERIFY_TIER ?= gate
 CPPFLAGS ?= -D_GNU_SOURCE
 INCS = $(CPPFLAGS) -Iinclude -I$(CUTILS)/include
 SRCS = $(wildcard src/*.c) $(wildcard $(CUTILS)/src/*.c)
@@ -56,7 +57,7 @@ difftest: $(BUILD)/cgrep
 	python3 -I tests/word_difftest.py $(BUILD)/cgrep
 
 verify:
-	CUTILS="$(abspath $(CUTILS))" DCHECK="$(DCHECK)" BUILD="$(BUILD)" bash tests/verify.sh
+	CUTILS="$(abspath $(CUTILS))" DCHECK="$(DCHECK)" BUILD="$(BUILD)" VERIFY_TIER="$(VERIFY_TIER)" bash tests/verify.sh
 
 mutate:
 	CUTILS="$(CUTILS)" bash tests/mutate.sh

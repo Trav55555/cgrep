@@ -28,6 +28,12 @@ def workflow_contract(text):
                 "persist-credentials: false"]
     if any(token not in text for token in required):
         raise ValueError("trusted push/runner/acceptance condition missing")
+    nightly = ["  schedule:\n    - cron: '0 7 * * *'\n  workflow_dispatch:\n",
+               "github.repository == 'trav/cgrep' && (github.event_name == 'schedule' ||\n"
+               "      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == 'trav'))",
+               "run: bash ci/verify.sh ${{ github.event_name == 'push' && 'gate' || 'deep' }}\n"]
+    if any(token not in text for token in nightly):
+        raise ValueError("nightly trigger, its trust condition, or the tier selection missing")
     artifact_requirements = ["if: always()", "path: ci-artifacts/", "if-no-files-found: error", "retention-days: 30", "uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32"]
     if any(token not in text for token in artifact_requirements) or not re.search(r"uses: actions/upload-artifact@[0-9a-f]{40}\n", text):
         raise ValueError("missing mandatory pinned artifact retention")
@@ -43,7 +49,7 @@ def script_contract(text):
         raise ValueError("required pin/profile/limit/failure-sensitive gate missing")
     acceptance = ('python3 -I "$work/cgrep/ci/reference.py" exec -- \\\n'
                   '    timeout --signal=TERM --kill-after=30s 30m make -j1 -C "$work/cgrep" verify \\\n'
-                  '    CUTILS="$work/c-utils" DCHECK="$toolchain/bin/dcheck" \\\n'
+                  '    CUTILS="$work/c-utils" DCHECK="$toolchain/bin/dcheck" VERIFY_TIER="$tier" \\\n'
                   '    2>&1 | tee "$work/acceptance.log"')
     if acceptance not in text:
         raise ValueError("checked reference must wrap the timed acceptance pipeline")
@@ -57,7 +63,11 @@ class CITests(unittest.TestCase):
         workflow_contract(text)
         for old, new in [("github.actor == 'trav'", "true"),
                          ("  push:", "  pull_request:"),
-                         ("cgrep-x86_64-3g", "ubuntu-latest")]:
+                         ("cgrep-x86_64-3g", "ubuntu-latest"),
+                         ("&& github.actor == 'trav'))", "))"),
+                         ("github.event_name == 'workflow_dispatch') &&", "github.event_name == 'workflow_dispatch') ||"),
+                         ("'gate' || 'deep'", "'deep' || 'gate'"),
+                         ("'0 7 * * *'", "'0 * * * *'")]:
             with self.assertRaises(ValueError):
                 workflow_contract(text.replace(old, new))
 
@@ -94,6 +104,18 @@ class CITests(unittest.TestCase):
             self.assertEqual(result.returncode, 7)
             self.assertEqual(log.read_text(), "seeded failure\n")
             self.assertNotIn("false PASS", result.stdout)
+
+    def test_tier_is_required(self):
+        for tier in [[], ["fast"], ["gate deep"]]:
+            result = subprocess.run(["bash", str(ROOT / "ci/verify.sh"), *tier], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, tier)
+            self.assertIn("usage: ci/verify.sh gate|deep", result.stderr)
+        with tempfile.TemporaryDirectory() as temporary:
+            env = dict(os.environ, CUTILS=temporary, BUILD=temporary, VERIFY_TIER="fast")
+            result = subprocess.run(["bash", str(ROOT / "tests/verify.sh"), "--profiled"],
+                                    capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("VERIFY_TIER must be gate or deep", result.stderr)
 
     def test_exact_sibling_pins(self):
         config = json.loads((ROOT / "ci/dependencies.json").read_text())
