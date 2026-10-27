@@ -1,7 +1,7 @@
 # Bounded C semantics suite
 
 `dcheck.conf` selects this directory through `SEMANTICS_TEST_DIR`. Cerberus
-runs these four harnesses, not the large finder and streaming corpora in
+runs these six harnesses, not the large finder and streaming corpora in
 `tests/`. dcheck reports that scope in text and JSON. Native checks still
 run all original tests plus these harnesses. `make test` also runs both groups.
 The framing fuzzer additionally checks exact output and seeded large refills;
@@ -14,7 +14,9 @@ finder and stream entry points.
 
 | Harness | Bound | Checked behavior |
 | --- | --- | --- |
-| `sem_cli.c` | Existing CLI suite, unchanged | Arguments, numbering, file/stdin selection, binary output, errors and status |
+| `sem_cli.c` | Existing CLI suite (`tests/test_cgrep.c`), less the cases the next two run | Arguments, numbering, file/stdin selection, binary output, usage, version, option names, errors and status |
+| `sem_flags.c` | The suite's staged-output, selection-flag, case and word cases | One write per output line, `-v`, `-c`, `-l`, clustered short flags, `-i` and `-w` |
+| `sem_edges.c` | The suite's long-option, boundary, literal-shape and output-error cases | Long option names as their short forms, binary and blank-line boundaries, `-` as stdin, repeated-byte patterns with overlapping and final matches, a failed write's error status |
 | `sem_find.c` | Two-byte haystacks and needles over two byte values; targeted haystacks/counting spans at most 300 bytes | Naive-search oracle at every start, all two-chunk splits, empty and high-byte patterns, NUL bytes, exact-size allocation, overlap, both rejection budgets and KMP fallback, immutable filters, uniform-window blockers, dense word counting, preparation failure |
 | `sem_stream.c` | Payloads at most 24 bytes; short reads of 1 through 7 bytes | Line/tail framing, numbering, binary matches split across reads, first NUL offset, partial output and scanner result on read failure, owned/borrowed stream cleanup, close failure, allocation recovery and later-file continuation, byte-counter overflow |
 
@@ -75,3 +77,12 @@ On the private repaired build, the focused run completed in about 71, 4,
 and 19 seconds for CLI, finder, and streaming. Peak RSS was approximately
 424, 187, and 271 MiB. These are resource observations, not fixed budgets or
 performance promises. Receipts are in `/tmp/cgrep-bounded-semantics.kTAzwU`.
+
+dcheck gives each harness 300 seconds. By 2026-10-27 the CLI suite had
+grown so that `sem_cli.c` took 516 s (878 MiB) alone and failed the
+nightly deep run on that limit, with nothing reported. Its long-option,
+boundary, literal-shape and output-error cases moved to `sem_edges.c`,
+as the flag cases had moved to `sem_flags.c`: run side by side, `sem_cli.c`
+took 95 s (571 MiB) and `sem_edges.c` 109 s (599 MiB). `tests/test_cgrep.c`
+still runs every case natively, in its original order; under Cerberus
+(`__cerb__`) it leaves out the cases those two files run.

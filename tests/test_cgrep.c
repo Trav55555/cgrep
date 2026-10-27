@@ -601,18 +601,22 @@ int main(void)
     test_binary();
     test_lines();
     test_stdin();
+#ifndef __cerb__
+    /* Under Cerberus this runs in sem_edges.c. */
     test_long_names();
+#endif
     test_usage();
     test_version();
     test_new_options();
 #ifndef __cerb__
-    /* Under Cerberus these run in sem_flags.c, within their own time limit. */
+    /* Under Cerberus the next three run in sem_flags.c and the last three
+     * in sem_edges.c, each file within its own time limit. */
     test_staged_output();
     test_selection_flags();
     test_case_and_words();
-#endif
     test_boundaries_and_explicit_stdin();
     test_literal_shapes();
     test_output_error();
+#endif
     return 0;
 }
