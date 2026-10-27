@@ -80,8 +80,9 @@ commit signatures or the identity of the Gitea operator.
 
 ## Nightly findings
 
-The nightly calls `ci/verify.sh deep`. After collecting the artifacts and
-releasing the lock, [`findings.py`](findings.py) judges the run from
+The nightly calls `ci/verify.sh deep`. After collecting the artifacts, and
+still holding the lock so two runs cannot both open an issue,
+[`findings.py`](findings.py) judges the run from
 cgrep's dcheck result (`cgrep.json`) and the acceptance exit status. The
 run passes only if acceptance passed and every check that
 `tests/check_receipt.py` requires at deep is among the result's passes, so
@@ -93,8 +94,10 @@ diagnostics (`file:line` and rule where dcheck gives them) and the last 60
 lines of its log. A run that fails before dcheck produces a result, or
 after it, is quoted from the end of `acceptance.log` (the selftest log if
 acceptance never started). The issue calls use
-the same `tea` login as the dependency fetcher, retried briefly; a Gitea
-failure there is reported and does not change the verdict.
+the same `tea` login as the dependency fetcher. Only a call Gitea did not
+answer is retried, for up to 10 minutes in all, and a create whose answer
+was lost is looked up before it is sent again; a Gitea failure there is
+reported and does not change the verdict.
 
 These findings are what to work from. Run the gate locally and leave deep
 to the nightly, unless a fix to a nightly finding needs confirming sooner.

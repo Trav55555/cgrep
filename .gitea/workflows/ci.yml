@@ -27,7 +27,7 @@ jobs:
       ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == 'trav'))
     runs-on: cgrep-x86_64-3g
     # The toolchain selftest, then acceptance: 30 minutes at gate, 100 at deep.
-    timeout-minutes: 130
+    timeout-minutes: 140
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

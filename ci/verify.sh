@@ -26,8 +26,9 @@ work="$(mktemp -d "$RUNNER_TEMP/cgrep-acceptance.XXXXXX")"
 printf 'CI scratch: %s\n' "$work"
 # EXIT collection runs after pass/failure, before the runner removes its temp.
 # Preserve the check's original failure; a collection failure also fails CI.
-# A deep run then judges itself with ci/findings.py, outside the lock, and
-# keeps the findings issue; a Gitea failure there does not change the verdict.
+# A deep run then judges itself with ci/findings.py, still holding the lock,
+# and keeps the findings issue; a Gitea failure there does not change the
+# verdict. Gitea gets 10 minutes, inside the job's timeout-minutes.
 collect_receipts() {
     status=$?
     trap - EXIT
@@ -36,12 +37,11 @@ collect_receipts() {
         if [[ "$status" -eq 0 ]]; then status=1; fi
     fi
     if [[ "$tier" == deep ]]; then
-        exec 9>&-
         log="$work/acceptance.log"
         [[ -f "$log" ]] || log="$work/toolchain-selftest.log"
         issue=()
         if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
-            issue=(--login trav --repo "$GITHUB_REPOSITORY" --attempts 3)
+            issue=(--login trav --repo "$GITHUB_REPOSITORY" --within 600)
         fi
         # The checks tests/check_receipt.py requires at deep, so none passes skipped.
         verdict=0
