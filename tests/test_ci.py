@@ -48,11 +48,13 @@ def script_contract(text):
     if any(token not in text for token in required):
         raise ValueError("required pin/profile/limit/failure-sensitive gate missing")
     acceptance = ('python3 -I "$work/cgrep/ci/reference.py" exec -- \\\n'
-                  '    timeout --signal=TERM --kill-after=30s 30m make -j1 -C "$work/cgrep" verify \\\n'
+                  '    timeout --signal=TERM --kill-after=30s "$limit" make -j1 -C "$work/cgrep" verify \\\n'
                   '    CUTILS="$work/c-utils" DCHECK="$toolchain/bin/dcheck" VERIFY_TIER="$tier" \\\n'
                   '    2>&1 | tee "$work/acceptance.log"')
     if acceptance not in text:
         raise ValueError("checked reference must wrap the timed acceptance pipeline")
+    if 'case "$tier" in gate) limit=30m ;; deep) limit=100m ;; esac' not in text:
+        raise ValueError("each tier needs its acceptance time limit")
     if "continue-on-error" in text or "|| true" in text:
         raise ValueError("CI cannot discard required failures")
 

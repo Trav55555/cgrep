@@ -68,8 +68,11 @@ toolchain="$work/dependable-c-agent-toolchain"
     -p MemoryMax=3G -p MemorySwapMax=0 -p RuntimeMaxSec=1200 nice -n 15 \
     make -j1 -C "$toolchain" selftest 2>&1 | tee "$work/toolchain-selftest.log"
 grep -Fx 'selftest: PASS' "$work/toolchain-selftest.log"
+# Deep adds Cerberus twice (serial_sensitivity.py and dcheck deep); in its
+# first run, 30 minutes ended inside dcheck deep.
+case "$tier" in gate) limit=30m ;; deep) limit=100m ;; esac
 python3 -I "$work/cgrep/ci/reference.py" exec -- \
-    timeout --signal=TERM --kill-after=30s 30m make -j1 -C "$work/cgrep" verify \
+    timeout --signal=TERM --kill-after=30s "$limit" make -j1 -C "$work/cgrep" verify \
     CUTILS="$work/c-utils" DCHECK="$toolchain/bin/dcheck" VERIFY_TIER="$tier" \
     2>&1 | tee "$work/acceptance.log"
 grep -F 'acceptance: PASS ' "$work/acceptance.log"
