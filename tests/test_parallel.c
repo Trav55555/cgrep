@@ -124,7 +124,7 @@ static int test_open(const char *path, int flags)
 {
     int fd;
 
-    if (fault == F_FIFO && strcmp(path, fault_path) != 0) {
+    if ((fault == F_FIFO && strcmp(path, fault_path) != 0) || fault == F_STOP) {
         assert(pthread_mutex_lock(&race_mutex) == 0);
         while (!race_ready)
             assert(pthread_cond_wait(&race_changed, &race_mutex) == 0);
@@ -296,7 +296,8 @@ static void test_free(void *p)
 
 /* Under F_WALK, listing fault_path waits until every input published so
  * far has been claimed: the search is running while the walk is not
- * finished. Under F_STOP, it waits for cancellation. */
+ * finished. Under F_STOP, it lets the workers open their inputs
+ * (test_open), then waits for cancellation. */
 static int test_dir_open(CuDir *d, CuArena *a, const char *path)
 {
     ParallelPool *pool;
@@ -304,6 +305,12 @@ static int test_dir_open(CuDir *d, CuArena *a, const char *path)
     if (fault_path != NULL && strcmp(path, fault_path) == 0 && (fault == F_WALK || fault == F_STOP)) {
         pool = (ParallelPool *)captured_pool;
         assert(pool != NULL);
+        if (fault == F_STOP) {
+            assert(pthread_mutex_lock(&race_mutex) == 0);
+            race_ready = 1;
+            assert(pthread_cond_broadcast(&race_changed) == 0);
+            assert(pthread_mutex_unlock(&race_mutex) == 0);
+        }
         cu_mutex_lock(pool->mutex);
         while (fault == F_WALK ? !(pool->count > 0 && pool->next == pool->count) : !pool->cancel)
             cu_cond_wait(pool->changed, pool->mutex);
@@ -749,13 +756,20 @@ static void walk_cases(const char *directory)
     /* Output fails on the first batch; the walker stops listing once it
      * notices the cancellation (here, when it enters "sub"), so the second
      * root is never listed. A diagnostic written before that (an unlistable
-     * directory) still reaches err, after the output error. */
+     * directory) still reaches err, after the output error. No input is
+     * opened until the walk is listing "sub", so the output cannot fail
+     * before the walk has passed "locked"; a slow walker (as under
+     * valgrind) could otherwise see the cancellation first and rightly
+     * list neither. */
     assert(sprintf(path, "%s/locked", root) > 0);
     assert(mkdir(path, 0700) == 0);
     if (geteuid() != 0)
         assert(chmod(path, 0) == 0);
     fault = F_STOP;
     fault_path = sub;
+    race_ready = 0;
+    assert(pthread_mutex_init(&race_mutex, NULL) == 0);
+    assert(pthread_cond_init(&race_changed, NULL) == 0);
     count_root = root;
     roots[0] = root;
     roots[1] = root;
@@ -766,7 +780,9 @@ static void walk_cases(const char *directory)
     alarm(15);
     assert(invoke(roots, 2, "-j4", out, err) == 2);
     alarm(0);
-    assert(subdir_opens == (geteuid() != 0 ? 2 : 2));
+    assert(pthread_cond_destroy(&race_changed) == 0);
+    assert(pthread_mutex_destroy(&race_mutex) == 0);
+    assert(subdir_opens == 2);
     assert(fputs("cgrep: output error\n", wanted) >= 0);
     if (geteuid() != 0)
         assert(fprintf(wanted, "cgrep: %s: %s\n", path, strerror(EACCES)) > 0);
