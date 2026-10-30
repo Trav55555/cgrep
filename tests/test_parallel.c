@@ -635,7 +635,6 @@ static void batch_cases(char **paths)
     /* An unreadable input in a batch is reported at its position. */
     fault = F_OPEN;
     fault_path = paths[2];
-    memset(&worker, 0, sizeof worker);
     worker.path = paths[2];
     worker.walked = 0;
     assert(worker_scan(&worker, NULL, NULL, &result) == 0);
