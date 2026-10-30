@@ -12,3 +12,4 @@
 {"commit": "5c3b07ddca5a3c342939d68a6d325afb29076452", "run_id": "40428765549", "cgrep_vs_rg": "1.16x faster (geomean)"}
 {"commit": "5a44692a2247bff2bb66ecba1d44722b814a2989", "run_id": "40522185636", "cgrep_vs_rg": "1.17x faster (geomean)"}
 {"commit": "432a6278aa998791ab34759e8f015abaa52b3c96", "run_id": "40591442563", "cgrep_vs_rg": "1.20x faster (geomean)"}
+{"commit": "93460c7cb8d9bbb20abe8d5aa29e193cc6a2e3a1", "run_id": "41114398337", "cgrep_vs_rg": "1.20x faster (geomean)"}
