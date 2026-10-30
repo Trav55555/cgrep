@@ -965,6 +965,7 @@ static int select_text(const Search *s, const char *name, CuStr text, CuStr hay,
 
 typedef enum {
     SCAN_OK,
+    SCAN_OPEN,
     SCAN_IO,
     SCAN_MEMORY,
     SCAN_LINE_LIMIT,
@@ -1566,6 +1567,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
 static const char *scan_error(ScanResult result)
 {
     switch (result.error) {
+    case SCAN_OPEN:
     case SCAN_IO:
         return result.system_error == 0 ? "input/output error" : strerror(result.system_error);
     case SCAN_MEMORY:
@@ -1603,7 +1605,7 @@ static int search_input(const Search *search, const char *path, int walked, FILE
     if (name == path) {
         if (!cu_input_open(&input, path)) {
             result.matched = 0;
-            result.error = SCAN_IO;
+            result.error = SCAN_OPEN;
             result.system_error = cu_input_errno(&input);
             result.bytes = 0;
             fprintf(err, "cgrep: %s: %s\n", name, scan_error(result));

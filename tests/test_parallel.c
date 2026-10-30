@@ -573,6 +573,8 @@ static void policy_cases(void)
  * three files, the next two and the last one. */
 static void batch_cases(char **paths)
 {
+    ParallelWorker worker;
+    ScanResult result;
     FILE *expected;
     FILE *expected_err;
     FILE *out;
@@ -633,6 +635,17 @@ static void batch_cases(char **paths)
     /* An unreadable input in a batch is reported at its position. */
     fault = F_OPEN;
     fault_path = paths[2];
+    memset(&worker, 0, sizeof worker);
+    worker.path = paths[2];
+    worker.walked = 0;
+    assert(worker_scan(&worker, NULL, NULL, &result) == 0);
+    assert(result.error == SCAN_OPEN && result.system_error == EACCES);
+    assert(!result.matched && result.bytes == 0);
+    assert(strcmp(scan_error(result), strerror(EACCES)) == 0);
+    fault = F_FDOPEN;
+    assert(worker_scan(&worker, NULL, NULL, &result) == 0);
+    assert(result.error == SCAN_OPEN);
+    fault = F_OPEN;
     out = tmpfile();
     err = tmpfile();
     wanted = tmpfile();

@@ -9,10 +9,12 @@
 #include "cu.h"
 #include "cgrep.h"
 
+static int open_calls;
 static int read_calls;
 static int reserve_calls;
 static int close_calls;
 static size_t buffer_allocations;
+static int fail_open_at;
 static int fail_read_at;
 static int fail_reserve_at;
 static int fail_close_at;
@@ -20,6 +22,19 @@ static size_t read_limit;
 static char directory[400];
 static char output_text[4096];
 static char error_text[4096];
+
+static int stream_open(CuInput *in, const char *path)
+{
+    open_calls++;
+    if (open_calls == fail_open_at) {
+        in->stream = NULL;
+        in->owns = 0;
+        in->state = CU_INPUT_ERROR;
+        in->error = EACCES;
+        return 0;
+    }
+    return cu_input_open(in, path);
+}
 
 static CuInputStatus stream_read(CuInput *in, void *buf, size_t cap, size_t *n)
 {
@@ -69,11 +84,13 @@ static int stream_close(CuInput *in)
 
 int cgrep_stream_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 
+#define cu_input_open stream_open
 #define cu_input_read stream_read
 #define cu_vec_reserve stream_reserve
 #define cu_input_close stream_close
 #define cgrep_main cgrep_stream_probe
 #include "../src/cgrep.c"
+#undef cu_input_open
 #undef cu_input_read
 #undef cu_vec_reserve
 #undef cu_input_close
@@ -81,10 +98,12 @@ int cgrep_stream_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 
 static void reset_faults(void)
 {
+    open_calls = 0;
     read_calls = 0;
     reserve_calls = 0;
     close_calls = 0;
     buffer_allocations = 0;
+    fail_open_at = 0;
     fail_read_at = 0;
     fail_reserve_at = 0;
     fail_close_at = 0;
@@ -451,6 +470,8 @@ static void test_failures(void)
 {
     static const char *const files[] = {"alpha", "@first", "@second"};
     static const char *const one[] = {"a"};
+    char expected[1024];
+    char path[512];
     char *bytes;
 
     write_file("first", "alpha\n", 6);
@@ -458,6 +479,16 @@ static void test_failures(void)
     reset_faults();
     assert(run(3, files, "", 0) == 0);
     assert(buffer_allocations == 1 && close_calls == 2);
+    reset_faults();
+    fail_open_at = 1;
+    assert(run(3, files, "", 0) == 2);
+    file_path(path, "first");
+    sprintf(expected, "cgrep: %s: %s\n", path, strerror(EACCES));
+    assert(strcmp(error_text, expected) == 0);
+    file_path(path, "second");
+    sprintf(expected, "%s:alpha\n", path);
+    assert(strcmp(output_text, expected) == 0);
+    assert(open_calls == 2 && close_calls == 1);
     reset_faults();
     fail_read_at = 2;
     assert(run(1, one, "a\nunfinished", 12) == 2);

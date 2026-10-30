@@ -735,7 +735,7 @@ static int worker_scan(ParallelWorker *worker, Search *search, CuVec *buffer, Sc
     errno = 0;
     fd = open(worker->path, O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
-        result.error = SCAN_IO;
+        result.error = SCAN_OPEN;
         result.system_error = errno;
     } else if (!worker->walked && cu_fd_info(fd, &info) != CU_INFO_OK) {
         saved = errno;
@@ -750,7 +750,7 @@ static int worker_scan(ParallelWorker *worker, Search *search, CuVec *buffer, Sc
         if (file == NULL) {
             saved = errno;
             close(fd);
-            result.error = SCAN_IO;
+            result.error = SCAN_OPEN;
             result.system_error = saved;
         } else {
             setvbuf(file, worker->input, _IOFBF, INPUT_BUFFER);
