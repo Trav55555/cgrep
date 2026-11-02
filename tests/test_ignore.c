@@ -2,15 +2,63 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include "cu.h"
 #include "cgrep.h"
+#if !defined(__cerb__) && defined(__unix__)
+#include <unistd.h>
+static int fail_source_fdopen;
+static int source_raw_closes;
+
+static FILE *source_fdopen(int fd, const char *mode)
+{
+    if (fail_source_fdopen) {
+        errno = EMFILE;
+        return NULL;
+    }
+    return fdopen(fd, mode);
+}
+
+static int source_raw_close(int fd)
+{
+    source_raw_closes++;
+    return close(fd);
+}
+
+static int fail_source_close;
+static int source_closes;
+
+static int source_close(FILE *stream)
+{
+    int result;
+
+    result = fclose(stream);
+    source_closes++;
+    if (fail_source_close) {
+        errno = EIO;
+        return EOF;
+    }
+    return result;
+}
+#endif
+
 int cgrep_ignore_probe(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 #define cgrep_main cgrep_ignore_probe
 /* A small work limit (each rule tried still adds IGNORE_RULE_WORK): what
  * matches within it here is far below the production limit, and what
  * exceeds it shows the matcher doing work it need not. */
 #define IGNORE_WORK_LIMIT 16384UL
+/* Keeps the oversized-source fixture small. */
+#define IGNORE_SOURCE_LIMIT 128UL
+#if !defined(__cerb__) && defined(__unix__)
+#define fclose source_close
+#define fdopen source_fdopen
+#define close source_raw_close
+#endif
 #include "../src/cgrep.c"
+#undef fdopen
+#undef close
+#undef fclose
 #undef cgrep_main
 
 static IgnoreWork work;
@@ -509,9 +557,103 @@ static void long_paths(void)
     cu_arena_release(&a);
 }
 
+/* ignore_slurp reads regular files only, without blocking and bounded: a
+ * missing source, a directory, a FIFO, a device, and an oversized source
+ * all yield nothing, and a symlink reads through to a regular file. The
+ * fixtures need native Unix files; fallback builds keep cu_file_read. */
+#if !defined(__cerb__) && defined(__unix__)
+static void slurp_sources(void)
+{
+    CuArena a;
+    CuStr text;
+    IgnoreFile rules;
+    char dir[128], path[256], target[300];
+    FILE *out;
+    int i;
+
+    cu_arena_init(&a);
+    assert(snprintf(dir, sizeof dir, "/tmp/cgrep-ignore-%ld", (long)getpid()) > 0);
+    assert(mkdir(dir, 0700) == 0);
+    assert(snprintf(target, sizeof target, "%s/plain", dir) > 0);
+    out = fopen(target, "wb");
+    assert(out != NULL);
+    fputs("build/\n", out);
+    assert(fclose(out) == 0);
+    assert(ignore_slurp(&a, target, &text) == 1);
+    assert(text.len == 7 && memcmp(text.ptr, "build/\n", 7) == 0);
+    source_closes = 0;
+    fail_source_close = 1;
+    assert(read_ignore_file(&a, target, &rules));
+    assert(rules.count == 0 && rules.rules == NULL);
+    assert(source_closes == 1 && !cu_arena_failed(&a));
+    fail_source_close = 0;
+    source_raw_closes = 0;
+    source_closes = 0;
+    fail_source_fdopen = 1;
+    assert(read_ignore_file(&a, target, &rules));
+    assert(rules.count == 0 && rules.rules == NULL);
+    assert(source_raw_closes == 1 && source_closes == 0);
+    assert(!cu_arena_failed(&a));
+    fail_source_fdopen = 0;
+    assert(snprintf(path, sizeof path, "%s/missing", dir) > 0);
+    assert(ignore_slurp(&a, path, &text) == 0 && text.len == 0);
+    assert(ignore_slurp(&a, dir, &text) == 0 && text.len == 0);
+    assert(snprintf(path, sizeof path, "%s/pipe", dir) > 0);
+    assert(mkfifo(path, 0600) == 0);
+    assert(ignore_slurp(&a, path, &text) == 0 && text.len == 0);
+    assert(snprintf(path, sizeof path, "%s/zero", dir) > 0);
+    assert(symlink("/dev/zero", path) == 0);
+    assert(ignore_slurp(&a, path, &text) == 0 && text.len == 0);
+    assert(snprintf(path, sizeof path, "%s/link", dir) > 0);
+    assert(symlink(target, path) == 0);
+    assert(ignore_slurp(&a, path, &text) == 1 && text.len == 7);
+    assert(snprintf(path, sizeof path, "%s/big", dir) > 0);
+    out = fopen(path, "wb");
+    assert(out != NULL);
+    for (i = 0; i < 200; i++)
+        fputc('x', out);
+    assert(fclose(out) == 0);
+    assert(ignore_slurp(&a, path, &text) == 0 && text.len == 0);
+    assert(!cu_arena_failed(&a));
+    for (i = 127; i <= 129; i++) {
+        int j;
+
+        out = fopen(path, "wb");
+        assert(out != NULL);
+        assert(fputs("build/\n#", out) >= 0);
+        for (j = 8; j < i; j++)
+            assert(fputc('x', out) != EOF);
+        assert(fclose(out) == 0);
+        assert(read_ignore_file(&a, path, &rules));
+        assert(rules.count == (i <= 128 ? 1u : 0u));
+        if (i <= 128)
+            assert(verdict(&rules, "build", 1) == 1);
+    }
+    cu_arena_release(&a);
+    cu_arena_init(&a);
+    cu_arena_fail_at(&a, 0);
+    source_closes = 0;
+    assert(!ignore_slurp(&a, target, &text));
+    assert(text.len == 0 && cu_arena_failed(&a) && source_closes == 1);
+    assert(remove(target) == 0);
+    assert(remove(path) == 0);
+    assert(snprintf(path, sizeof path, "%s/pipe", dir) > 0);
+    assert(remove(path) == 0);
+    assert(snprintf(path, sizeof path, "%s/zero", dir) > 0);
+    assert(remove(path) == 0);
+    assert(snprintf(path, sizeof path, "%s/link", dir) > 0);
+    assert(remove(path) == 0);
+    assert(rmdir(dir) == 0);
+    cu_arena_release(&a);
+}
+#endif
+
 int main(void)
 {
     boundaries();
+#if !defined(__cerb__) && defined(__unix__)
+    slurp_sources();
+#endif
     double_star();
     trailing_space();
     final_component();

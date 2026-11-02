@@ -156,7 +156,14 @@ names beginning with `.` are skipped. Rules inside a pruned directory are
 not loaded. Unreadable ignore files are silently skipped, as ripgrep does.
 
 Each entry's verdict has a matching work limit, which every rule tried
-extends, so large files of ordinary rules are matched in full. Adjacent
+extends, so accepted files of ordinary rules are matched in full. On Unix,
+each source has an inclusive 16 MiB input cap: overflow discards the whole
+source, just like an unreadable source. This covers `.rgignore`, `.ignore`,
+`.gitignore`, `info/exclude`, the global ignore file, and `gitdir`/`commondir`
+metadata. Only regular files are accepted, opened without blocking. The cap
+bounds accepted bytes, not stdio prefetch (reads use 4096-byte blocks).
+Other hosts retain the existing `cu_file_read` behavior without this cap.
+Adjacent
 `**` components match as one, as in Git, so chains of them stay linear;
 a pattern that still retries exponentially (several `**` separated by
 other components against a deep path) exceeds the limit. That entry is

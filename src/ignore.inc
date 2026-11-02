@@ -23,6 +23,11 @@
 #define CGREP_GETCWD 1
 #endif
 
+#if !defined(__cerb__) && defined(__unix__)
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
+
 enum { IG_CUSTOM, IG_IGNORE, IG_GIT, IG_EXCLUDE, IG_KINDS };
 
 typedef struct {
@@ -365,14 +370,80 @@ static int parse_ignore(CuArena *a, CuStr text, IgnoreFile *f)
     return !cu_vec_failed(&rules);
 }
 
-/* Reads path into f; a missing or unreadable file has no rules. */
+/* Oversized ignore sources have no rules, as an unreadable file does. */
+#ifndef IGNORE_SOURCE_LIMIT
+#define IGNORE_SOURCE_LIMIT 16777216UL
+#endif
+
+/* Reads path into text like cu_file_read, but only from a regular file and
+ * at most IGNORE_SOURCE_LIMIT bytes. The open does not block and the opened
+ * file is checked, so a planted FIFO hangs nothing and a device such as
+ * /dev/zero feeds nothing to the parser. Returns 1 with what was read, 0
+ * when the source is missing, unreadable, not a regular file, or over the
+ * limit; a failed arena marks itself. Non-unix hosts keep cu_file_read. */
+#if !defined(__cerb__) && defined(__unix__)
+static int ignore_slurp(CuArena *a, const char *path, CuStr *out)
+{
+    struct stat st;
+    FILE *stream;
+    CuBuilder b;
+    CuStr text;
+    char bytes[4096];
+    size_t n, total;
+    int fd, bad;
+
+    *out = cu_str_empty();
+    fd = open(path, O_RDONLY | O_NONBLOCK);
+    if (fd < 0)
+        return 0;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        (void)close(fd);
+        return 0;
+    }
+    stream = fdopen(fd, "rb");
+    if (stream == NULL) {
+        (void)close(fd);
+        return 0;
+    }
+    cu_sb_init(&b, a);
+    total = 0;
+    bad = 0;
+    while ((n = fread(bytes, 1, sizeof bytes, stream)) != 0) {
+        if (n > (size_t)IGNORE_SOURCE_LIMIT - total || ferror(stream)) {
+            bad = 1;
+            break;
+        }
+        total += n;
+        cu_sb_str(&b, cu_str_n(bytes, n));
+        if (b.failed) {
+            bad = 1;
+            break;
+        }
+    }
+    if (!bad && ferror(stream))
+        bad = 1;
+    if (fclose(stream) != 0)
+        bad = 1;
+    if (bad)
+        return 0;
+    if (!cu_sb_finish(&b, &text))
+        return 0;
+    *out = text;
+    return 1;
+}
+#else
+#define ignore_slurp cu_file_read
+#endif
+
+/* Reads path into f; a missing, unreadable, or non-regular source has no
+ * rules. */
 static int read_ignore_file(CuArena *a, const char *path, IgnoreFile *f)
 {
     CuStr text;
 
     f->rules = NULL;
     f->count = 0;
-    if (!cu_file_read(a, path, &text))
+    if (!ignore_slurp(a, path, &text))
         return !cu_arena_failed(a);
     return parse_ignore(a, text, f);
 }
@@ -423,8 +494,9 @@ static int exclude_path(CuArena *a, const char *dir, char **out)
     git = join_path(a, dir, cu_str_cstr(".git"));
     if (git == NULL)
         return 0;
-    /* Reading a directory fails, leaving git as it is. */
-    if (cu_file_read(a, git, &text)) {
+    /* A non-regular .git (a directory, a FIFO) reads as nothing, leaving
+     * git as it is. */
+    if (ignore_slurp(a, git, &text)) {
         if (text.len < 8 || memcmp(text.ptr, "gitdir: ", 8) != 0)
             return 1;
         text.ptr += 8;
@@ -436,7 +508,7 @@ static int exclude_path(CuArena *a, const char *dir, char **out)
     path = git == NULL ? NULL : join_path(a, git, cu_str_cstr("commondir"));
     if (path == NULL)
         return 0;
-    if (cu_file_read(a, path, &text))
+    if (ignore_slurp(a, path, &text))
         git = git_path(a, git, text);
     else if (cu_arena_failed(a))
         return 0;
