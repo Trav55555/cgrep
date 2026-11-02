@@ -1331,6 +1331,15 @@ static int long_line(const Search *s, CuInput *in, CuVec *buffer, char extra, un
             result->error = SCAN_CANCELLED;
             return -1;
         }
+        /* The carry can fill the buffer: the pattern can be longer than
+         * the printing window. Keep the room the streaming scan keeps, so
+         * the extra byte and the next read both fit. */
+        buffer->len = held;
+        if (buffer->cap - held < STREAM_CHUNK / 2 &&
+            !cu_vec_reserve(buffer, STREAM_CHUNK)) {
+            result->error = SCAN_MEMORY;
+            return -1;
+        }
         if (pending) {
             /* The byte that showed the line was too long comes first. */
             buffer->data[held++] = extra;
@@ -1386,6 +1395,7 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
     CuInputStatus status;
     CuArena *arena;
     const char *nul;
+    const char *retained;
     char *destination;
     char extra;
     size_t want;
@@ -1450,9 +1460,13 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
             }
         }
         old_len = buffer->len;
-        probing = old_len == buffer->cap;
+        /* Storage can grow for long-pattern carry and is reused between
+         * files. It does not enlarge the logical printing window. */
+        probing = old_len == STREAM_LINE_LIMIT;
         destination = probing ? &extra : buffer->data + old_len;
         want = probing ? 1 : buffer->cap - old_len;
+        if (!probing && want > STREAM_LINE_LIMIT - old_len)
+            want = STREAM_LINE_LIMIT - old_len;
         if (want > STREAM_CHUNK)
             want = STREAM_CHUNK;
         /* Match the streaming reference's initial encoding-probe boundary.
@@ -1529,6 +1543,27 @@ static ScanResult search_stream(const Search *s, const char *name, CuInput *in, 
                     break;
                 if (s->numbers)
                     lines++;
+                /* The skip leaves everything after the oversized line's
+                 * newline, which can hold complete lines. Print each with
+                 * its own number, so the loop's "old bytes contain no LF"
+                 * rule keeps holding; keep only the unfinished tail. */
+                for (;;) {
+                    retained = (const char *)memchr(buffer->data, '\n', buffer->len);
+                    if (retained == NULL)
+                        break;
+                    end = (size_t)(retained - buffer->data) + 1;
+                    found = print_window(s, name, cu_str_n(buffer->data, end), &lines);
+                    if (found < 0) {
+                        result.error = found == -2 ? SCAN_MEMORY : SCAN_OUTPUT;
+                        break;
+                    }
+                    result.matched |= found;
+                    buffer->len -= end;
+                    if (buffer->len != 0)
+                        memmove(buffer->data, buffer->data + end, buffer->len);
+                }
+                if (result.error != SCAN_OK)
+                    break;
                 continue;
             }
             found = print_window(s, name, cu_str_n(buffer->data, old_len), &lines);
@@ -1673,15 +1708,21 @@ typedef struct {
 
 /* Inputs to search, in order: argument paths, and the files found under
  * directory arguments, which get the reference's handling of binary files
- * found while walking (see Search.walked). With a worker pool the vectors
- * are shared with the pool's threads, touched only under its mutex, and
- * the lister adds to them in runs of INPUT_PENDING. */
+ * found while walking (see Search.walked). With a worker pool the vector
+ * is shared with the pool's threads, touched only under its mutex, and
+ * the lister adds to it in runs of INPUT_PENDING. */
 #define INPUT_PENDING 64
 typedef struct ParallelPool ParallelPool;
 typedef struct Prefetch Prefetch;
+/* One searched input: its path and whether the walk found it. One vector
+ * keeps path and flag at the same index, so an allocation failure cannot
+ * desync them. */
+typedef struct InputItem {
+    char *path;           /* borrowed from argv or in the walk arena */
+    unsigned char walked; /* 1 for a path found by walking */
+} InputItem;
 typedef struct {
-    CuVec paths;  /* char *, borrowed from argv or in the walk arena */
-    CuVec walked; /* unsigned char, 1 for a path found by walking */
+    CuVec items;        /* InputItem, in listing order */
     ParallelPool *pool; /* NULL: the caller searches after listing */
     Prefetch *prefetch; /* NULL: the walk lists each directory itself */
     int stop;           /* the pool was cancelled: list no more */
@@ -1713,10 +1754,13 @@ static int entry_order(const void *a, const void *b)
 
 static int add_input(Inputs *inputs, char *path, unsigned char walked)
 {
+    InputItem item;
+
     if (inputs->pool == NULL) {
-        CU_VEC_PUSH(&inputs->paths, &path);
-        CU_VEC_PUSH(&inputs->walked, &walked);
-        return !cu_vec_failed(&inputs->paths) && !cu_vec_failed(&inputs->walked);
+        item.path = path;
+        item.walked = walked;
+        CU_VEC_PUSH(&inputs->items, &item);
+        return !cu_vec_failed(&inputs->items);
     }
     inputs->pending_paths[inputs->pending] = path;
     inputs->pending_walked[inputs->pending] = walked;
@@ -2180,8 +2224,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     unsigned char *directories;
     CuStr pattern;
     char *folded;
-    char **paths;
-    unsigned char *walked;
+    InputItem *items;
     int count;
     int k;
     int i;
@@ -2358,8 +2401,7 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     listing.arena = &walk_arena;
     listing.cwd = cwd;
     listing.cwd_size = sizeof cwd;
-    CU_VEC_INIT(&listing.inputs.paths, &walk_arena, char *);
-    CU_VEC_INIT(&listing.inputs.walked, &walk_arena, unsigned char);
+    CU_VEC_INIT(&listing.inputs.items, &walk_arena, InputItem);
     listing.inputs.pool = NULL;
     listing.inputs.prefetch = NULL;
     listing.inputs.stop = 0;
@@ -2400,16 +2442,15 @@ int cgrep_main(int argc, char **argv, FILE *in, FILE *out, FILE *err)
     }
     if (!list_inputs(&listing, err))
         failed = 1;
-    count = (int)cu_vec_len(&listing.inputs.paths);
-    paths = CU_VEC_DATA(&listing.inputs.paths, char *);
-    walked = CU_VEC_DATA(&listing.inputs.walked, unsigned char);
+    count = (int)cu_vec_len(&listing.inputs.items);
+    items = CU_VEC_DATA(&listing.inputs.items, InputItem);
     if (i == argc) {
         r = search_input(&s, NULL, 0, in, err, &buffer);
         matched = r == 1;
         failed = r < 0;
     }
     for (k = 0; k < count; k++) {
-        r = search_input(&s, paths[k], walked[k], in, err, &buffer);
+        r = search_input(&s, items[k].path, items[k].walked, in, err, &buffer);
         if (r == 1)
             matched = 1;
         else if (r < 0)

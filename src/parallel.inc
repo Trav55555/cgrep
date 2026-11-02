@@ -216,6 +216,7 @@ static void take_diagnostics(ParallelPool *pool, CuVec *into, FILE *err)
 static int inputs_publish(Inputs *inputs)
 {
     ParallelPool *pool;
+    InputItem item;
     size_t len;
     int f;
     int ok;
@@ -223,12 +224,13 @@ static int inputs_publish(Inputs *inputs)
     pool = inputs->pool;
     pool_lock(pool);
     for (f = 0; f < inputs->pending; f++) {
-        CU_VEC_PUSH(&inputs->paths, &inputs->pending_paths[f]);
-        CU_VEC_PUSH(&inputs->walked, &inputs->pending_walked[f]);
+        item.path = inputs->pending_paths[f];
+        item.walked = inputs->pending_walked[f];
+        CU_VEC_PUSH(&inputs->items, &item);
     }
     inputs->pending = 0;
-    len = cu_vec_len(&inputs->paths);
-    ok = !cu_vec_failed(&inputs->paths) && !cu_vec_failed(&inputs->walked) && len <= INT_MAX;
+    len = cu_vec_len(&inputs->items);
+    ok = !cu_vec_failed(&inputs->items) && len <= INT_MAX;
     if (ok)
         pool->count = (int)len;
     if (pool->cancel)
@@ -838,8 +840,7 @@ static void worker_main(void *context)
     Search search;
     Finder finder;
     ScanResult result;
-    char **paths;
-    const unsigned char *walked;
+    const InputItem *items;
     unsigned long bytes;
     int start;
     int n;
@@ -876,11 +877,10 @@ static void worker_main(void *context)
         pool_claim(pool, worker->index, start, n);
         /* Inputs this claim left are other idle workers' to take. */
         wake_idle(pool, pool->count - pool->next, 0);
-        paths = CU_VEC_DATA(&pool->listing->inputs.paths, char *);
-        walked = CU_VEC_DATA(&pool->listing->inputs.walked, unsigned char);
+        items = CU_VEC_DATA(&pool->listing->inputs.items, InputItem);
         for (f = 0; f < n; f++) {
-            worker->paths[f] = paths[start + f];
-            worker->walked_flags[f] = walked[start + f];
+            worker->paths[f] = items[start + f].path;
+            worker->walked_flags[f] = items[start + f].walked;
         }
         worker->bytes = worker->slots[worker->fill].bytes;
         worker->used = 0;
@@ -1179,8 +1179,8 @@ static int parallel_search(const Search *search, Listing *listing, int jobs, FIL
             }
             if (pool->next < pool->count) {
                 if (pool->started == 0) {
-                    path = CU_VEC_DATA(&listing->inputs.paths, char *)[pool->next];
-                    walked = CU_VEC_DATA(&listing->inputs.walked, unsigned char)[pool->next];
+                    path = CU_VEC_DATA(&listing->inputs.items, InputItem)[pool->next].path;
+                    walked = CU_VEC_DATA(&listing->inputs.items, InputItem)[pool->next].walked;
                     pool->next++;
                     pool->claims++;
                     mode = COORDINATE_INLINE;

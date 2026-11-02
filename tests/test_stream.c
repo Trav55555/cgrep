@@ -20,7 +20,7 @@ static int fail_reserve_at;
 static int fail_close_at;
 static size_t read_limit;
 static char directory[400];
-static char output_text[4096];
+static char output_text[16777232];
 static char error_text[4096];
 
 static int stream_open(CuInput *in, const char *path)
@@ -306,8 +306,12 @@ static void test_line_limit(void)
     static const char *const folded_args[] = {"-ni", "alpha"};
     static const char *const word_args[] = {"-nw", "alpha"};
     static const char *const inverted_args[] = {"-nv", "alpha"};
+    const char *long_args[3];
+    const char *mode_args[4];
+    char *long_pattern;
     char *bytes;
     int at;
+    size_t length;
 
     bytes = (char *)malloc(STREAM_LINE_LIMIT + 8);
     assert(bytes != NULL);
@@ -328,6 +332,27 @@ static void test_line_limit(void)
     reset_faults();
     assert(run(2, args, bytes, STREAM_LINE_LIMIT + 7) == 0);
     assert(strcmp(output_text, "2:alpha\n") == 0);
+    /* A short matching line retained after an oversized line keeps its
+     * own number even when later LF-free refills reach the limit again:
+     * the skip must not turn the retained line into a limit error. */
+    free(bytes);
+    bytes = (char *)malloc(2 * STREAM_LINE_LIMIT + 32);
+    assert(bytes != NULL);
+    memset(bytes, 'x', STREAM_LINE_LIMIT + 1);
+    memcpy(bytes + STREAM_LINE_LIMIT + 1, "\nalpha\n", 7);
+    memset(bytes + STREAM_LINE_LIMIT + 8, 'x', STREAM_LINE_LIMIT);
+    memcpy(bytes + 2 * STREAM_LINE_LIMIT + 8, "\n", 1);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT + 9) == 0);
+    assert(strcmp(output_text, "2:alpha\n") == 0 && error_text[0] == '\0');
+    /* Retained lines print in order before the tail line; the second
+     * copy opens with its own newline, so it is line 4. */
+    memcpy(bytes + STREAM_LINE_LIMIT + 8, "\nalpha\n", 7);
+    memset(bytes + STREAM_LINE_LIMIT + 15, 'x', STREAM_LINE_LIMIT);
+    memcpy(bytes + 2 * STREAM_LINE_LIMIT + 15, "\n", 1);
+    reset_faults();
+    assert(run(2, args, bytes, 2 * STREAM_LINE_LIMIT + 16) == 0);
+    assert(strcmp(output_text, "2:alpha\n4:alpha\n") == 0 && error_text[0] == '\0');
     /* Twice the limit and more before the next line, which -i still prints
      * as read; a -w candidate inside the long line is not a word. */
     free(bytes);
@@ -400,6 +425,69 @@ static void test_line_limit(void)
     reset_faults();
     assert(run(2, uncounted, bytes, STREAM_LINE_LIMIT + 2) == 1);
     assert(output_text[0] == '\0' && error_text[0] == '\0' && buffer_allocations == 1);
+    /* A pattern longer than the printing window carries the whole
+     * window, and the pending byte must still fit in the buffer. */
+    free(bytes);
+    bytes = (char *)malloc(STREAM_LINE_LIMIT + 2);
+    assert(bytes != NULL);
+    memset(bytes, 'x', STREAM_LINE_LIMIT + 1);
+    bytes[STREAM_LINE_LIMIT + 1] = '\n';
+    long_pattern = (char *)malloc(STREAM_LINE_LIMIT + 2);
+    assert(long_pattern != NULL);
+    memset(long_pattern, 'y', STREAM_LINE_LIMIT + 1);
+    long_pattern[STREAM_LINE_LIMIT + 1] = '\0';
+    long_args[0] = long_pattern;
+    reset_faults();
+    assert(run(1, long_args, bytes, STREAM_LINE_LIMIT + 2) == 1);
+    assert(output_text[0] == '\0' && error_text[0] == '\0');
+    free(bytes);
+    bytes = (char *)malloc(2 * (STREAM_LINE_LIMIT + 2));
+    assert(bytes != NULL);
+    memset(bytes, 'x', STREAM_LINE_LIMIT + 1);
+    bytes[STREAM_LINE_LIMIT + 1] = '\n';
+    memset(bytes + STREAM_LINE_LIMIT + 2, 'y', STREAM_LINE_LIMIT + 1);
+    bytes[2 * STREAM_LINE_LIMIT + 3] = '\n';
+    reset_faults();
+    assert(run(1, long_args, bytes, 2 * STREAM_LINE_LIMIT + 4) == 2);
+    assert(output_text[0] == '\0');
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    write_file("first", bytes, STREAM_LINE_LIMIT + 2);
+    write_file("second", bytes + STREAM_LINE_LIMIT + 2, STREAM_LINE_LIMIT + 2);
+    long_args[1] = "@first";
+    long_args[2] = "@second";
+    reset_faults();
+    read_limit = 70001;
+    assert(run(3, long_args, "", 0) == 2);
+    assert(output_text[0] == '\0' && close_calls == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    mode_args[0] = "-iw";
+    mode_args[1] = long_pattern;
+    mode_args[2] = "@first";
+    mode_args[3] = "@second";
+    memset(long_pattern, 'Y', STREAM_LINE_LIMIT + 1);
+    reset_faults();
+    read_limit = 70001;
+    assert(run(4, mode_args, "", 0) == 2);
+    assert(output_text[0] == '\0' && close_calls == 2);
+    assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+    memset(long_pattern, 'y', STREAM_LINE_LIMIT + 1);
+    /* Preserve both inclusive boundaries with short reads. A shorter
+     * pattern selects all three sizes, including at EOF. */
+    long_pattern[STREAM_LINE_LIMIT - 1] = '\0';
+    for (length = STREAM_LINE_LIMIT - 1; length <= STREAM_LINE_LIMIT + 1; length++) {
+        reset_faults();
+        read_limit = 70001;
+        assert(run(1, long_args, bytes + STREAM_LINE_LIMIT + 2, length) ==
+               (length <= STREAM_LINE_LIMIT ? 0 : 2));
+        if (length <= STREAM_LINE_LIMIT) {
+            assert(strlen(output_text) == length + 1);
+            assert(output_text[length] == '\n' && error_text[0] == '\0');
+        } else {
+            assert(output_text[0] == '\0');
+            assert(strstr(error_text, "line exceeds 8 MiB") != NULL);
+        }
+    }
+    free(long_pattern);
     free(bytes);
 }
 
