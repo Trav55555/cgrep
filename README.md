@@ -227,10 +227,14 @@ memory limit.
 <details>
 <summary>Streaming, binary detection, and memory details</summary>
 
-Each worker starts with a reusable 64 KiB input window. It grows only for an
-unfinished line. Geometric arena growth keeps window storage below 16 MiB,
-plus metadata. Shared pattern storage, an O(pattern length) prefix table,
-libc overhead, worker stacks, and output slots are additional costs.
+Each worker starts with a reusable 64 KiB input window. It grows for an
+unfinished line or the overlap needed to match a long pattern. With small
+patterns, geometric arena growth keeps window storage below 16 MiB, plus
+metadata. Long patterns can require additional O(pattern length) window
+storage per worker, retained for reuse across inputs. The 8 MiB printing
+limit does not cap that storage. Shared pattern storage, an O(pattern length)
+prefix table, libc overhead, worker stacks, and output slots are additional
+costs.
 
 Tests exercise serial 64 MiB files and pipes, and eight workers scanning
 448 MiB under a 32 MiB address-space limit. These cases use a small pattern

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def build(project, cutils, binary, sanitize=False):
     compiler = "clang" if sanitize else os.environ.get("CC", "cc")
-    flags = ["-std=c99", "-g", "-UNDEBUG", "-Wall", "-Wextra", "-Werror"]
+    flags = ["-std=c99", "-D_GNU_SOURCE", "-g", "-UNDEBUG", "-Wall", "-Wextra", "-Werror"]
     flags += (["-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
               if sanitize else ["-O2"])
     sources = list((project / "src").glob("*.c")) + list((cutils / "src").glob("*.c"))

@@ -16,7 +16,7 @@ def exercise(project, test, cutils, model, negative):
     binary = project / "sensor"
     sources = [*map(str, (project / "src").glob("*.c")), *map(str, (cutils / "src").glob("*.c"))]
     includes = ["-I" + str(project / "include"), "-I" + str(cutils / "include")]
-    subprocess.run(["clang", "-std=c89", "-pedantic-errors", "-Wall", "-Wextra", *([] if negative else ["-Werror"]),
+    subprocess.run(["clang", "-std=c89", "-D_GNU_SOURCE", "-pedantic-errors", "-Wall", "-Wextra", *([] if negative else ["-Werror"]),
                     "-g", "-O1", "-UNDEBUG", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                     *includes, str(project / test), *sources, "-o", str(binary)], check=True, timeout=90)
     native = subprocess.run([str(binary)], capture_output=True, timeout=60)

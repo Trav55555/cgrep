@@ -80,8 +80,8 @@ def main():
         run(binary, "ASan/UBSan/LSan")
         print("PASS native worker failure/lifetime paths: ASan/UBSan/LSan", flush=True)
         for filename, name, old, new, rejection in [
-            ("parallel.inc", "file-reordering", "worker->paths[f] = paths[start + f];",
-             "worker->paths[f] = paths[pool->count - 1 - (start + f)];", "assert"),
+            ("parallel.inc", "file-reordering", "worker->paths[f] = items[start + f].path;",
+             "worker->paths[f] = items[pool->count - 1 - (start + f)].path;", "assert"),
             ("parallel.inc", "lost-input-status",
              'fprintf(err, "cgrep: %s: %s\\n", record->path, scan_error(record->result));\n                *failed = 1;',
              'fprintf(err, "cgrep: %s: %s\\n", record->path, scan_error(record->result));\n                *failed = 0;',
