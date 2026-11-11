@@ -51,7 +51,8 @@ jobs:
     # Push and workflow_dispatch also require the trusted actor.
     if: >-
       always() && (github.event_name != 'schedule' || needs.unbuilt.outputs.build == 'true') &&
-      (github.repository == 'trav/cgrep' && (github.event_name == 'schedule' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == 'trav')))
+      github.repository == 'trav/cgrep' && (github.event_name == 'schedule' ||
+      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.actor == 'trav'))
     runs-on: cgrep-x86_64-3g
     # The toolchain selftest, then acceptance: 30 minutes at gate, 100 at deep.
     timeout-minutes: 140

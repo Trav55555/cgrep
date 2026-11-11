@@ -34,6 +34,13 @@ def workflow_contract(text):
                "run: bash ci/verify.sh ${{ github.event_name == 'push' && 'gate' || 'deep' }}\n"]
     if any(token not in text for token in nightly):
         raise ValueError("nightly trigger, its trust condition, or the tier selection missing")
+    unbuilt = ["  unbuilt:\n    if: github.event_name == 'schedule' && github.repository == 'trav/cgrep'\n    runs-on: ci-arm64\n",
+               "    needs: unbuilt\n",
+               "always() && (github.event_name != 'schedule' || needs.unbuilt.outputs.build == 'true') &&\n",
+               "- name: Record the nightly result on the commit\n        if: always() && github.event_name != 'push'\n",
+               '\\"context\\":\\"cgrep nightly\\"']
+    if any(token not in text for token in unbuilt):
+        raise ValueError("a scheduled run must build only an unbuilt HEAD and record its result")
     artifact_requirements = ["if: always()", "path: ci-artifacts/", "if-no-files-found: error", "retention-days: 30", "uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32"]
     if any(token not in text for token in artifact_requirements) or not re.search(r"uses: actions/upload-artifact@[0-9a-f]{40}\n", text):
         raise ValueError("missing mandatory pinned artifact retention")
@@ -69,7 +76,10 @@ class CITests(unittest.TestCase):
                          ("&& github.actor == 'trav'))", "))"),
                          ("github.event_name == 'workflow_dispatch') &&", "github.event_name == 'workflow_dispatch') ||"),
                          ("'gate' || 'deep'", "'deep' || 'gate'"),
-                         ("'0 7 * * *'", "'0 * * * *'")]:
+                         ("'0 7 * * *'", "'0 * * * *'"),
+                         ("needs.unbuilt.outputs.build == 'true'", "true"),
+                         ("    needs: unbuilt\n", ""),
+                         ("if: always() && github.event_name != 'push'", "if: github.event_name == 'never'")]:
             with self.assertRaises(ValueError):
                 workflow_contract(text.replace(old, new))
 
