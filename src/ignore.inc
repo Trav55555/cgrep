@@ -384,25 +384,31 @@ static int parse_ignore(CuArena *a, CuStr text, IgnoreFile *f)
 #if !defined(__cerb__) && defined(__unix__)
 static int ignore_slurp(CuArena *a, const char *path, CuStr *out)
 {
-    struct stat st;
+    CuFileInfo info;
+    CuInfoResult result;
     FILE *stream;
     CuBuilder b;
     CuStr text;
     char bytes[4096];
     size_t n, total;
-    int fd, bad;
+    int fd, bad, saved_errno;
 
     *out = cu_str_empty();
     fd = open(path, O_RDONLY | O_NONBLOCK);
     if (fd < 0)
         return 0;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    result = cu_fd_info(fd, &info);
+    saved_errno = errno;
+    if (result != CU_INFO_OK || info.kind != CU_DIR_FILE) {
         (void)close(fd);
+        errno = saved_errno;
         return 0;
     }
     stream = fdopen(fd, "rb");
     if (stream == NULL) {
+        saved_errno = errno;
         (void)close(fd);
+        errno = saved_errno;
         return 0;
     }
     cu_sb_init(&b, a);
